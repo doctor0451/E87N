@@ -68,23 +68,20 @@ jobs:
       run: |
         cd openwrt
         make defconfig
-        # 尝试运行 olddefconfig，失败时以 V=s 重试并保存日志
-        if ! make olddefconfig -j1; then
-          echo "::error:: olddefconfig failed, re-running with V=s to capture details"
-          make olddefconfig V=s 2>&1 | tee ../olddefconfig.log
+        # 使用 oldconfig 自动接受所有默认值，避免交互
+        if ! yes "" | make oldconfig; then
+          echo "::error:: oldconfig failed, dumping .config for diagnosis"
+          cat .config
           exit 1
         fi
-
-        # 下载源码包，若失败则用 -j1 重试并保存日志
         if ! make download -j8; then
           echo "::warning:: download with -j8 failed, retrying with -j1"
           make download -j1 2>&1 | tee ../make-download.log
           exit 1
         fi
-
-        # 清理不完整的下载文件
         find dl -size -1024c -exec ls -l {} \;
         find dl -size -1024c -exec rm -f {} \;
+
     - name: Compile firmware EdgePI E87N MT7987A
       id: compile
       run: |
