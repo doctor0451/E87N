@@ -68,8 +68,21 @@ jobs:
       run: |
         cd openwrt
         make defconfig
-        make olddefconfig
-        make download -j8
+        # 尝试运行 olddefconfig，失败时以 V=s 重试并保存日志
+        if ! make olddefconfig -j1; then
+          echo "::error:: olddefconfig failed, re-running with V=s to capture details"
+          make olddefconfig V=s 2>&1 | tee ../olddefconfig.log
+          exit 1
+        fi
+
+        # 下载源码包，若失败则用 -j1 重试并保存日志
+        if ! make download -j8; then
+          echo "::warning:: download with -j8 failed, retrying with -j1"
+          make download -j1 2>&1 | tee ../make-download.log
+          exit 1
+        fi
+
+        # 清理不完整的下载文件
         find dl -size -1024c -exec ls -l {} \;
         find dl -size -1024c -exec rm -f {} \;
     - name: Compile firmware EdgePI E87N MT7987A
@@ -93,7 +106,8 @@ jobs:
         path: openwrt/bin
     - name: Organize firmware files
       id: organize
-      if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
+      # ✅ 修改点1：仅在编译成功后才整理固件
+      if: steps.compile.outputs.status == 'success' && env.UPLOAD_FIRMWARE == 'true' && !cancelled()
       run: |
         cd openwrt/bin/targets/*/*
         rm -rf packages
@@ -107,7 +121,8 @@ jobs:
         path: ${{ env.FIRMWARE }}
     - name: Generate Release tag
       id: tag
-      if: env.UPLOAD_RELEASE == 'true' && !cancelled()
+      # ✅ 修改点2：仅在编译成功后才生成 Release tag
+      if: steps.compile.outputs.status == 'success' && env.UPLOAD_RELEASE == 'true' && !cancelled()
       run: |
         echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
         echo "### EdgePI E87N MT7987A 无WiFi固件" > release.txt
@@ -117,7 +132,8 @@ jobs:
         echo "status=success" >> $GITHUB_OUTPUT
     - name: Upload firmware to GitHub Release
       uses: softprops/action-gh-release@master
-      if: steps.tag.outputs.status == 'success' && !cancelled()
+      # ✅ 修改点3：编译成功且 tag 成功时才上传
+      if: steps.compile.outputs.status == 'success' && steps.tag.outputs.status == 'success' && !cancelled()
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
