@@ -6,7 +6,6 @@ on:
   repository_dispatch:
   workflow_dispatch:
 env:
-  # 目标源码仓库：padavanonly mt798x 6.6 mtwifi分支
   REPO_URL: https://github.com/padavanonly/immortalwrt-mt798x-6.6
   REPO_BRANCH: mt798x-mt799x-6.6-mtwifi
   FEEDS_CONF: feeds.conf.default
@@ -27,6 +26,7 @@ jobs:
     steps:
     - name: Checkout 仓库配置文件
       uses: actions/checkout@main
+
     - name: Initialization environment
       env:
         DEBIAN_FRONTEND: noninteractive
@@ -35,27 +35,34 @@ jobs:
         sudo docker image prune --all --force
         sudo -E apt-get -qq update
         sudo -E apt-get -qq install ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential bzip2 ccache cmake cpio curl device-tree-compiler fastjar flex gawk gettext gcc-multilib g++-multilib git gperf haveged help2man intltool libc6-dev-i386 libelf-dev libfuse-dev libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev libncurses5-dev libncursesw5-dev libpython3-dev libreadline-dev libssl-dev libtool lrzsz mkisofs msmtp ninja-build p7zip p7zip-full patch pkgconf python2.7 python3 python3-pyelftools python3-setuptools qemu-utils rsync scons squashfs-tools subversion swig texinfo uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev
+        # 添加可能缺失的构建工具
+        sudo -E apt-get -qq install bc fakeroot libncurses-dev subversion unzip g++-multilib || true
         sudo -E apt-get -qq autoremove --purge
         sudo -E apt-get -qq clean
         sudo timedatectl set-timezone "$TZ"
         sudo mkdir -p /workdir
         sudo chown $USER:$GROUPS /workdir
+
     - name: Clone MT798x 6.6 源码
       working-directory: /workdir
       run: |
         df -hT $PWD
         git clone $REPO_URL -b $REPO_BRANCH openwrt
         ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
+
     - name: Load custom feeds(diy-part1)
       run: |
         [ -e $FEEDS_CONF ] && mv $FEEDS_CONF openwrt/feeds.conf.default
         chmod +x $DIY_P1_SH
         cd openwrt
         $GITHUB_WORKSPACE/$DIY_P1_SH
+
     - name: Update feeds
       run: cd openwrt && ./scripts/feeds update -a
+
     - name: Install feeds
       run: cd openwrt && ./scripts/feeds install -a
+
     - name: Load custom config & diy-part2.sh
       run: |
         [ -e files ] && mv files openwrt/files
@@ -63,17 +70,14 @@ jobs:
         chmod +x $DIY_P2_SH
         cd openwrt
         $GITHUB_WORKSPACE/$DIY_P2_SH
+
     - name: Download package source
       id: package
       run: |
         cd openwrt
         make defconfig
-        # 使用 oldconfig 自动接受所有默认值，避免交互
-        if ! yes "" | make oldconfig; then
-          echo "::error:: oldconfig failed, dumping .config for diagnosis"
-          cat .config
-          exit 1
-        fi
+        # 使用 oldconfig 自动接受默认值（避免交互）
+        yes "" | make oldconfig
         if ! make download -j8; then
           echo "::warning:: download with -j8 failed, retrying with -j1"
           make download -j1 2>&1 | tee ../make-download.log
@@ -82,43 +86,72 @@ jobs:
         find dl -size -1024c -exec ls -l {} \;
         find dl -size -1024c -exec rm -f {} \;
 
+    # ⭐ 新增步骤：预处理内核配置，强制非交互
+    - name: Prepare kernel config (non-interactive)
+      run: |
+        cd openwrt
+        # 再次运行 defconfig/oldconfig，确保与当前树一致
+        make defconfig
+        yes "" | make oldconfig
+        # 专门处理内核子树的 Kconfig 新选项
+        yes "" | make kernel_oldconfig || true
+        # 运行内核 prepare 目标，生成 include/config/auto.conf 等
+        make target/linux/prepare || true
+
+    # ⭐ 修改编译步骤：并行失败后自动单线程 + V=s 并保存日志
     - name: Compile firmware EdgePI E87N MT7987A
       id: compile
       run: |
         cd openwrt
         echo -e "$(nproc) thread compile"
-        make -j$(nproc) || make -j1 || make -j1 V=s
-        echo "status=success" >> $GITHUB_OUTPUT
+        # 先尝试并行编译
+        if make -j$(nproc); then
+          echo "status=success" >> $GITHUB_OUTPUT
+        else
+          echo "::warning:: Parallel build failed, retrying single-thread verbose build and saving log"
+          # 单线程 + V=s 保存日志
+          make -j1 V=s 2>&1 | tee ../make-build.log
+          # 如果失败，输出尾部并标记错误
+          if [ ${PIPESTATUS[0]} -ne 0 ]; then
+            tail -n 400 ../make-build.log
+            echo "::error:: Build failed, see make-build.log artifact"
+            exit 1
+          fi
+        fi
+        # 提取设备名称
         grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
         [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
         echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
+
     - name: Check disk space
       if: (!cancelled())
       run: df -hT
+
     - name: Upload bin directory artifact
       uses: actions/upload-artifact@main
       if: steps.compile.outputs.status == 'success' && env.UPLOAD_BIN_DIR == 'true'
       with:
         name: OpenWrt_bin${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
         path: openwrt/bin
+
     - name: Organize firmware files
       id: organize
-      # ✅ 修改点1：仅在编译成功后才整理固件
       if: steps.compile.outputs.status == 'success' && env.UPLOAD_FIRMWARE == 'true' && !cancelled()
       run: |
         cd openwrt/bin/targets/*/*
         rm -rf packages
         echo "FIRMWARE=$PWD" >> $GITHUB_ENV
         echo "status=success" >> $GITHUB_OUTPUT
+
     - name: Upload firmware artifact
       uses: actions/upload-artifact@main
       if: steps.organize.outputs.status == 'success' && !cancelled()
       with:
         name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
         path: ${{ env.FIRMWARE }}
+
     - name: Generate Release tag
       id: tag
-      # ✅ 修改点2：仅在编译成功后才生成 Release tag
       if: steps.compile.outputs.status == 'success' && env.UPLOAD_RELEASE == 'true' && !cancelled()
       run: |
         echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
@@ -127,9 +160,9 @@ jobs:
         echo "- CPU: MT7987A 8G eMMC 双NVME插槽 无内置WiFi" >> release.txt
         echo "- 编译时间: $(date +"%Y-%m-%d %H:%M:%S")" >> release.txt
         echo "status=success" >> $GITHUB_OUTPUT
+
     - name: Upload firmware to GitHub Release
       uses: softprops/action-gh-release@master
-      # ✅ 修改点3：编译成功且 tag 成功时才上传
       if: steps.compile.outputs.status == 'success' && steps.tag.outputs.status == 'success' && !cancelled()
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -140,11 +173,24 @@ jobs:
           ${{ env.FIRMWARE }}/*.bin
           ${{ env.FIRMWARE }}/*.manifest
           ${{ env.FIRMWARE }}/*.buildinfo
+
+    # ⭐ 新增步骤：上传构建日志（无论成败）
+    - name: Upload build log
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: make-build-log
+        path: |
+          make-build.log
+          make-download.log
+          olddefconfig.log
+
     - name: Delete old workflow runs
       uses: Mattraks/delete-workflow-runs@main
       with:
         retain_days: 0
         keep_minimum_runs: 5
+
     - name: Auto clean old Releases
       uses: dev-drprasad/delete-older-releases@master
       if: env.UPLOAD_RELEASE == 'true' && !cancelled()
