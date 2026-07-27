@@ -6,9 +6,8 @@ on:
   repository_dispatch:
   workflow_dispatch:
 env:
-  # 目标源码仓库：Hiveton higowrt 默认分支
   REPO_URL: https://github.com/Hiveton/higowrt
-  REPO_BRANCH: main  # 修改为仓库的实际默认分支
+  REPO_BRANCH: main
   FEEDS_CONF: feeds.conf.default
   CONFIG_FILE: .config
   DIY_P1_SH: diy-part1.sh
@@ -45,32 +44,34 @@ jobs:
       run: |
         df -hT $PWD
         git clone $REPO_URL -b $REPO_BRANCH openwrt || \
-        git clone $REPO_URL openwrt  # 如果分支失败，回退到默认分支
+        git clone $REPO_URL openwrt
         ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
     - name: Load custom feeds(diy-part1)
       run: |
-        [ -e $FEEDS_CONF ] && mv $FEEDS_CONF openwrt/feeds.conf.default
+        cd "$GITHUB_WORKSPACE"
+        [ -e $FEEDS_CONF ] && cp -v $FEEDS_CONF openwrt/feeds.conf.default
         chmod +x $DIY_P1_SH
         cd openwrt
-        $GITHUB_WORKSPACE/$DIY_P1_SH
+        "$GITHUB_WORKSPACE/$DIY_P1_SH"
     - name: Update feeds
-      run: cd openwrt && ./scripts/feeds update -a
+      run: cd "$GITHUB_WORKSPACE/openwrt" && ./scripts/feeds update -a
     - name: Install feeds
-      run: cd openwrt && ./scripts/feeds install -a
+      run: cd "$GITHUB_WORKSPACE/openwrt" && ./scripts/feeds install -a
     - name: Load custom config & diy-part2.sh
       run: |
-        [ -e files ] && mv files openwrt/files
-        [ -e $CONFIG_FILE ] && mv $CONFIG_FILE openwrt/.config
+        cd "$GITHUB_WORKSPACE"
+        [ -e files ] && cp -r files openwrt/files
+        [ -e $CONFIG_FILE ] && cp -v $CONFIG_FILE openwrt/.config
         chmod +x $DIY_P2_SH
-        cd openwrt
-        $GITHUB_WORKSPACE/$DIY_P2_SH
+        # 直接执行脚本，脚本内部会处理路径
+        "$GITHUB_WORKSPACE/$DIY_P2_SH"
     - name: Download package source
       id: package
       run: |
-        cd openwrt
+        cd "$GITHUB_WORKSPACE/openwrt"
         make defconfig
         if ! make olddefconfig -j1; then
-          echo "::error:: olddefconfig failed, re-running with V=s to capture details"
+          echo "::error:: olddefconfig failed"
           make olddefconfig V=s 2>&1 | tee ../olddefconfig.log
           exit 1
         fi
@@ -84,7 +85,7 @@ jobs:
     - name: Compile firmware EdgePI E87N MT7987A
       id: compile
       run: |
-        cd openwrt
+        cd "$GITHUB_WORKSPACE/openwrt"
         echo -e "$(nproc) thread compile"
         make -j$(nproc) || make -j1 || make -j1 V=s
         echo "status=success" >> $GITHUB_OUTPUT
@@ -104,15 +105,18 @@ jobs:
       id: organize
       if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
       run: |
-        # 修复：使用通配符匹配实际路径
-        FIRMWARE_DIR=$(find openwrt/bin/targets -type d -name "filogic" | head -1)
+        cd "$GITHUB_WORKSPACE/openwrt"
+        # 使用通配符匹配实际路径
+        FIRMWARE_DIR=$(find bin/targets -type d -name "filogic" 2>/dev/null | head -1)
         if [ -d "$FIRMWARE_DIR" ]; then
           cd "$FIRMWARE_DIR"
           rm -rf packages
           echo "FIRMWARE=$PWD" >> $GITHUB_ENV
           echo "status=success" >> $GITHUB_OUTPUT
         else
-          echo "::error::Firmware directory not found!"
+          echo "::error::Firmware directory not found! Check if compilation succeeded."
+          echo "Contents of bin/targets:"
+          ls -la bin/targets/ 2>/dev/null || echo "bin/targets not found"
           exit 1
         fi
     - name: Upload firmware artifact
