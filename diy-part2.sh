@@ -31,13 +31,29 @@ for pkg in "${WIFI_PACKAGES[@]}"; do
     fi
 done
 
-# --- 2. 删除有问题的 feeds 包 ---
-echo "### 2. 删除有问题的 feeds 包 ###"
+# --- 2. 创建最小 feeds.conf.default ---
+echo "### 2. 创建最小 feeds 配置 ###"
+cat > feeds.conf.default << 'EOF'
+# 最小 feeds 配置 - 仅包含核心包
+src-git packages https://git.openwrt.org/feed/packages.git
+src-git luci https://git.openwrt.org/project/luci.git
+src-git routing https://git.openwrt.org/feed/routing.git
+EOF
+
+# --- 3. 更新 feeds（这里会下载包） ---
+echo "### 3. 更新 feeds ###"
+./scripts/feeds update -a
+./scripts/feeds install -a
+
+# --- 4. 再次删除有问题的包（feeds 更新后可能重新出现） ---
+echo "### 4. 删除有问题的 feeds 包 ###"
 PROBLEM_PACKAGES=(
     "package/feeds/helloworld/luci-app-ssr-plus"
     "package/feeds/packages/nfs-kernel-server"
     "package/feeds/packages/onionshare-cli"
     "package/feeds/luci/luci-app-mjpg-streamer"
+    # 也删除可能存在的变体
+    "package/feeds/packages/nfs-kernel-server"
 )
 
 for pkg in "${PROBLEM_PACKAGES[@]}"; do
@@ -47,30 +63,15 @@ for pkg in "${PROBLEM_PACKAGES[@]}"; do
     fi
 done
 
-# --- 3. 只删除 siflower 平台（而非所有非 MTK 平台） ---
-echo "### 3. 删除 siflower 平台 ###"
+# --- 5. 删除 siflower 平台 ---
+echo "### 5. 删除 siflower 平台 ###"
 if [ -d "target/linux/siflower" ]; then
     echo "删除: target/linux/siflower"
     rm -rf target/linux/siflower
 fi
 
-# --- 4. 创建最小 feeds.conf.default ---
-echo "### 4. 创建最小 feeds 配置 ###"
-cat > feeds.conf.default << 'EOF'
-# 最小 feeds 配置 - 仅包含核心包
-src-git packages https://git.openwrt.org/feed/packages.git
-src-git luci https://git.openwrt.org/project/luci.git
-src-git routing https://git.openwrt.org/feed/routing.git
-EOF
-
-# --- 5. 重新更新 feeds ---
-echo "### 5. 重新更新 feeds ###"
-./scripts/feeds update -a
-./scripts/feeds install -a
-
 # --- 6. 执行 defconfig ---
 echo "### 6. 执行 defconfig ###"
-# 先重置配置
 ./scripts/config --disable CONFIG_MTK_WIFI7_SUPPORT
 ./scripts/config --disable CONFIG_PACKAGE_kmod-mt7992-firmware
 ./scripts/config --disable CONFIG_PACKAGE_kmod-mt_wifi7
@@ -86,7 +87,6 @@ echo "### 6. 执行 defconfig ###"
 # 设置目标设备
 ./scripts/config --set-val CONFIG_TARGET_mediatek_filogic_DEVICE_edgepi_e87n y
 
-# 执行 defconfig
 make defconfig
 
 # --- 7. 复制 E87N DTS 文件到源码目录 ---
@@ -103,11 +103,11 @@ else
     echo "警告: DTS目录不存在: $DTS_SRC"
 fi
 
-# --- 8. 检查 target/linux/mediatek 目录是否存在 ---
+# --- 8. 验证 target/linux/mediatek 目录 ---
 echo "### 8. 验证目录结构 ###"
 if [ -d "target/linux/mediatek" ]; then
     echo "target/linux/mediatek 存在"
-    ls -la target/linux/mediatek/
+    ls -la target/linux/mediatek/ | head -20
 else
     echo "错误: target/linux/mediatek 不存在!"
     exit 1
