@@ -1,5 +1,5 @@
 #!/bin/bash
-# diy-part2.sh - E87N 专属定制 - 彻底清理版
+# diy-part2.sh - E87N 专属定制
 
 # 使用绝对路径
 OPENWRT_DIR="${GITHUB_WORKSPACE}/openwrt"
@@ -47,15 +47,12 @@ for pkg in "${PROBLEM_PACKAGES[@]}"; do
     fi
 done
 
-# --- 3. 清理 target/linux 下非 MTK 平台 ---
-echo "### 3. 清理非 MTK 平台 ###"
-cd target/linux || exit 1
-# 保留 mediatek，删除其他平台（避免 Kconfig 干扰）
-for platform in $(ls -d */ 2>/dev/null | grep -v "mediatek"); do
-    echo "删除平台: $platform"
-    rm -rf "$platform"
-done
-cd "$OPENWRT_DIR" || exit 1
+# --- 3. 只删除 siflower 平台（而非所有非 MTK 平台） ---
+echo "### 3. 删除 siflower 平台 ###"
+if [ -d "target/linux/siflower" ]; then
+    echo "删除: target/linux/siflower"
+    rm -rf target/linux/siflower
+fi
 
 # --- 4. 创建最小 feeds.conf.default ---
 echo "### 4. 创建最小 feeds 配置 ###"
@@ -64,7 +61,6 @@ cat > feeds.conf.default << 'EOF'
 src-git packages https://git.openwrt.org/feed/packages.git
 src-git luci https://git.openwrt.org/project/luci.git
 src-git routing https://git.openwrt.org/feed/routing.git
-# 只保留必要的 feeds
 EOF
 
 # --- 5. 重新更新 feeds ---
@@ -72,15 +68,9 @@ echo "### 5. 重新更新 feeds ###"
 ./scripts/feeds update -a
 ./scripts/feeds install -a
 
-# --- 6. 删除可能存在问题的 Kconfig 引用 ---
-echo "### 6. 清理 Kconfig 中的问题引用 ###"
-# 删除 siflower 相关的 Kconfig 引用
-find . -name "Kconfig" -exec sed -i '/siflower/d' {} \; 2>/dev/null || true
-# 删除其他非 MTK 平台的引用
-find . -name "Kconfig" -exec sed -i '/SIFLOWER/d' {} \; 2>/dev/null || true
-
-# --- 7. 执行 defconfig ---
-echo "### 7. 执行 defconfig ###"
+# --- 6. 执行 defconfig ---
+echo "### 6. 执行 defconfig ###"
+# 先重置配置
 ./scripts/config --disable CONFIG_MTK_WIFI7_SUPPORT
 ./scripts/config --disable CONFIG_PACKAGE_kmod-mt7992-firmware
 ./scripts/config --disable CONFIG_PACKAGE_kmod-mt_wifi7
@@ -96,21 +86,31 @@ echo "### 7. 执行 defconfig ###"
 # 设置目标设备
 ./scripts/config --set-val CONFIG_TARGET_mediatek_filogic_DEVICE_edgepi_e87n y
 
+# 执行 defconfig
 make defconfig
 
-# --- 8. 复制 E87N DTS 文件到源码目录 ---
-echo "### 8. 复制 E87N DTS 文件 ###"
+# --- 7. 复制 E87N DTS 文件到源码目录 ---
+echo "### 7. 复制 E87N DTS 文件 ###"
 DTS_SRC="${GITHUB_WORKSPACE}/DTS"
 DTS_DST="${OPENWRT_DIR}/target/linux/mediatek/dts"
 
 if [ -d "$DTS_SRC" ]; then
-    # 确保目标目录存在
     mkdir -p "$DTS_DST"
     cp -v "$DTS_SRC"/*.dts "$DTS_DST/" 2>/dev/null || true
     cp -v "$DTS_SRC"/*.dtsi "$DTS_DST/" 2>/dev/null || true
     echo "DTS文件复制完成"
 else
     echo "警告: DTS目录不存在: $DTS_SRC"
+fi
+
+# --- 8. 检查 target/linux/mediatek 目录是否存在 ---
+echo "### 8. 验证目录结构 ###"
+if [ -d "target/linux/mediatek" ]; then
+    echo "target/linux/mediatek 存在"
+    ls -la target/linux/mediatek/
+else
+    echo "错误: target/linux/mediatek 不存在!"
+    exit 1
 fi
 
 echo "### diy-part2.sh 执行完成 ###"
