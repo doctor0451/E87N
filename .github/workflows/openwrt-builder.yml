@@ -66,6 +66,7 @@ jobs:
         # 直接执行脚本，脚本内部会处理路径
         "$GITHUB_WORKSPACE/$DIY_P2_SH"
     - name: Download package source
+      id: package
       run: |
           cd "$GITHUB_WORKSPACE/openwrt"
           
