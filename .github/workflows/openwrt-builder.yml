@@ -65,35 +65,35 @@ jobs:
         chmod +x $DIY_P2_SH
         # 直接执行脚本，脚本内部会处理路径
         "$GITHUB_WORKSPACE/$DIY_P2_SH"
-    - - name: Download package source
-        id: package
-        run: |
-          cd "$GITHUB_WORKSPACE/openwrt"
-          
-          # 先执行 defconfig（diy-part2.sh 已经做了）
-          make defconfig
-          
-          # 尝试 olddefconfig，如果失败则查看详细错误
-          if ! make olddefconfig -j1; then
-            echo "::error:: olddefconfig failed, re-running with V=s to capture details"
-            make olddefconfig V=s 2>&1 | tee ../olddefconfig.log
-            echo "=== 显示 .config 中 WiFi 相关选项 ==="
-            grep -i wifi .config || echo "无 WiFi 选项"
-            echo "=== 显示被禁用的包目录 ==="
-            ls -la package/mtk/drivers/ | grep disabled || echo "无禁用目录"
-            exit 1
-          fi
-          
-          # 下载源码包
-          if ! make download -j8; then
-            echo "::warning:: download with -j8 failed, retrying with -j1"
-            make download -j1 2>&1 | tee ../make-download.log
-            exit 1
-          fi
-          
-          # 清理不完整的下载文件
-          find dl -size -1024c -exec ls -l {} \;
-          find dl -size -1024c -exec rm -f {} \;
+    - name: Download package source
+      id: package
+      run: |
+        cd "$GITHUB_WORKSPACE/openwrt"
+        
+        # 先执行 defconfig（diy-part2.sh 已经做了）
+        make defconfig
+        
+        # 尝试 olddefconfig，如果失败则查看详细错误
+        if ! make olddefconfig -j1; then
+          echo "::error:: olddefconfig failed, re-running with V=s to capture details"
+          make olddefconfig V=s 2>&1 | tee ../olddefconfig.log
+          echo "=== 显示 .config 中 WiFi 相关选项 ==="
+          grep -i wifi .config || echo "无 WiFi 选项"
+          echo "=== 显示被禁用的包目录 ==="
+          ls -la package/mtk/drivers/ | grep disabled || echo "无禁用目录"
+          exit 1
+        fi
+        
+        # 下载源码包
+        if ! make download -j8; then
+          echo "::warning:: download with -j8 failed, retrying with -j1"
+          make download -j1 2>&1 | tee ../make-download.log
+          exit 1
+        fi
+        
+        # 清理不完整的下载文件
+        find dl -size -1024c -exec ls -l {} \;
+        find dl -size -1024c -exec rm -f {} \;
     - name: Compile firmware EdgePI E87N MT7987A
       id: compile
       run: |
