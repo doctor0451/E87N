@@ -1,7 +1,6 @@
 #!/bin/bash
-# diy-part2.sh - E87N 专属定制
+# diy-part2.sh - E87N 专属定制 (干净版本)
 
-# 使用绝对路径
 OPENWRT_DIR="${GITHUB_WORKSPACE}/openwrt"
 if [ ! -d "$OPENWRT_DIR" ]; then
     echo "错误: openwrt 目录不存在: $OPENWRT_DIR"
@@ -10,68 +9,53 @@ fi
 
 cd "$OPENWRT_DIR" || exit 1
 
-# --- 1. 物理删除所有 WiFi 相关包目录 ---
-echo "### 1. 删除所有 WiFi 相关包 ###"
-WIFI_PACKAGES=(
-    "package/mtk/drivers/mt_wifi7"
-    "package/mtk/drivers/mt_hwifi"
-    "package/mtk/drivers/mt_wifi_osal"
-    "package/mtk/drivers/warp"
-    "package/mtk/drivers/wifi-profile"
-)
-
-for pkg in "${WIFI_PACKAGES[@]}"; do
-    if [ -d "$pkg" ]; then
-        echo "删除: $pkg"
-        rm -rf "$pkg"
-    fi
-    if [ -d "${pkg}.disabled" ]; then
-        echo "删除: ${pkg}.disabled"
-        rm -rf "${pkg}.disabled"
-    fi
-done
-
-# --- 2. 创建最小 feeds.conf.default ---
-echo "### 2. 创建最小 feeds 配置 ###"
+# --- 1. 完全重置 feeds 配置 ---
+echo "### 1. 重置 feeds 配置为最简状态 ###"
 cat > feeds.conf.default << 'EOF'
-# 最小 feeds 配置 - 仅包含核心包
+# 最简 feeds - 只使用官方核心源
 src-git packages https://git.openwrt.org/feed/packages.git
 src-git luci https://git.openwrt.org/project/luci.git
 src-git routing https://git.openwrt.org/feed/routing.git
 EOF
 
-# --- 3. 更新 feeds（这里会下载包） ---
-echo "### 3. 更新 feeds ###"
+# --- 2. 更新并安装 feeds ---
+echo "### 2. 更新并安装 feeds ###"
 ./scripts/feeds update -a
 ./scripts/feeds install -a
 
-# --- 4. 再次删除有问题的包（feeds 更新后可能重新出现） ---
-echo "### 4. 删除有问题的 feeds 包 ###"
-PROBLEM_PACKAGES=(
-    "package/feeds/helloworld/luci-app-ssr-plus"
-    "package/feeds/packages/nfs-kernel-server"
-    "package/feeds/packages/onionshare-cli"
-    "package/feeds/luci/luci-app-mjpg-streamer"
-    # 也删除可能存在的变体
-    "package/feeds/packages/nfs-kernel-server"
-)
+# --- 3. 暴力删除所有可能干扰的包 ---
+echo "### 3. 删除干扰包 ###"
+# 删除整个 feeds 目录中可能有问题的大类
+rm -rf package/feeds/helloworld 2>/dev/null || true
+rm -rf package/feeds/packages/nfs-kernel-server 2>/dev/null || true
+rm -rf package/feeds/packages/onionshare-cli 2>/dev/null || true
+rm -rf package/feeds/luci/luci-app-mjpg-streamer 2>/dev/null || true
+rm -rf package/feeds/luci/luci-app-ssr-plus 2>/dev/null || true
 
-for pkg in "${PROBLEM_PACKAGES[@]}"; do
-    if [ -d "$pkg" ]; then
-        echo "删除: $pkg"
-        rm -rf "$pkg"
-    fi
-done
+# --- 4. 删除所有 WiFi 驱动包 ---
+echo "### 4. 删除 WiFi 驱动包 ###"
+rm -rf package/mtk/drivers/mt_wifi7 2>/dev/null || true
+rm -rf package/mtk/drivers/mt_hwifi 2>/dev/null || true
+rm -rf package/mtk/drivers/mt_wifi_osal 2>/dev/null || true
+rm -rf package/mtk/drivers/warp 2>/dev/null || true
+rm -rf package/mtk/drivers/wifi-profile 2>/dev/null || true
 
-# --- 5. 删除 siflower 平台 ---
-echo "### 5. 删除 siflower 平台 ###"
-if [ -d "target/linux/siflower" ]; then
-    echo "删除: target/linux/siflower"
-    rm -rf target/linux/siflower
-fi
+# --- 5. 删除非 MTK 平台干扰 ---
+echo "### 5. 删除非 MTK 平台 ###"
+# 只删除明确有问题的 siflower
+rm -rf target/linux/siflower 2>/dev/null || true
 
-# --- 6. 执行 defconfig ---
-echo "### 6. 执行 defconfig ###"
+# --- 6. 生成一个最简的 .config（只编译 mediatek/filogic） ---
+echo "### 6. 生成最简配置 ###"
+# 使用默认配置，然后强制设置目标
+make defconfig
+
+# 使用 scripts/config 设置目标
+./scripts/config --set-val CONFIG_TARGET_mediatek y
+./scripts/config --set-val CONFIG_TARGET_mediatek_filogic y
+./scripts/config --set-val CONFIG_TARGET_mediatek_filogic_DEVICE_edgepi_e87n y
+
+# 禁用所有 WiFi
 ./scripts/config --disable CONFIG_MTK_WIFI7_SUPPORT
 ./scripts/config --disable CONFIG_PACKAGE_kmod-mt7992-firmware
 ./scripts/config --disable CONFIG_PACKAGE_kmod-mt_wifi7
@@ -84,12 +68,10 @@ echo "### 6. 执行 defconfig ###"
 ./scripts/config --disable CONFIG_PACKAGE_hostapd-common
 ./scripts/config --disable CONFIG_PACKAGE_wpad-basic
 
-# 设置目标设备
-./scripts/config --set-val CONFIG_TARGET_mediatek_filogic_DEVICE_edgepi_e87n y
-
+# 再次执行 defconfig 应用更改
 make defconfig
 
-# --- 7. 复制 E87N DTS 文件到源码目录 ---
+# --- 7. 复制 E87N DTS 文件 ---
 echo "### 7. 复制 E87N DTS 文件 ###"
 DTS_SRC="${GITHUB_WORKSPACE}/DTS"
 DTS_DST="${OPENWRT_DIR}/target/linux/mediatek/dts"
@@ -103,14 +85,9 @@ else
     echo "警告: DTS目录不存在: $DTS_SRC"
 fi
 
-# --- 8. 验证 target/linux/mediatek 目录 ---
-echo "### 8. 验证目录结构 ###"
-if [ -d "target/linux/mediatek" ]; then
-    echo "target/linux/mediatek 存在"
-    ls -la target/linux/mediatek/ | head -20
-else
-    echo "错误: target/linux/mediatek 不存在!"
-    exit 1
-fi
+# --- 8. 验证关键目录 ---
+echo "### 8. 验证关键目录 ###"
+ls -la target/linux/mediatek/
+ls -la target/linux/mediatek/dts/ 2>/dev/null || echo "dts目录为空"
 
 echo "### diy-part2.sh 执行完成 ###"
