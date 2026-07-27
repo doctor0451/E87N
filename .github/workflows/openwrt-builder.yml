@@ -6,9 +6,9 @@ on:
   repository_dispatch:
   workflow_dispatch:
 env:
-  # 目标源码仓库：Hiveton higowrt v25.12.1 分支
+  # 目标源码仓库：Hiveton higowrt 默认分支
   REPO_URL: https://github.com/Hiveton/higowrt
-  REPO_BRANCH: v25.12.1   
+  REPO_BRANCH: main  # 修改为仓库的实际默认分支
   FEEDS_CONF: feeds.conf.default
   CONFIG_FILE: .config
   DIY_P1_SH: diy-part1.sh
@@ -40,11 +40,12 @@ jobs:
         sudo timedatectl set-timezone "$TZ"
         sudo mkdir -p /workdir
         sudo chown $USER:$GROUPS /workdir
-    - name: Clone MT798x 6.6 源码
+    - name: Clone MT798x 源码
       working-directory: /workdir
       run: |
         df -hT $PWD
-        git clone $REPO_URL -b $REPO_BRANCH openwrt
+        git clone $REPO_URL -b $REPO_BRANCH openwrt || \
+        git clone $REPO_URL openwrt  # 如果分支失败，回退到默认分支
         ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
     - name: Load custom feeds(diy-part1)
       run: |
@@ -68,21 +69,16 @@ jobs:
       run: |
         cd openwrt
         make defconfig
-        # 尝试运行 olddefconfig，失败时以 V=s 重试并保存日志
         if ! make olddefconfig -j1; then
           echo "::error:: olddefconfig failed, re-running with V=s to capture details"
           make olddefconfig V=s 2>&1 | tee ../olddefconfig.log
           exit 1
         fi
-
-        # 下载源码包，若失败则用 -j1 重试并保存日志
         if ! make download -j8; then
           echo "::warning:: download with -j8 failed, retrying with -j1"
           make download -j1 2>&1 | tee ../make-download.log
           exit 1
         fi
-
-        # 清理不完整的下载文件
         find dl -size -1024c -exec ls -l {} \;
         find dl -size -1024c -exec rm -f {} \;
     - name: Compile firmware EdgePI E87N MT7987A
@@ -108,10 +104,17 @@ jobs:
       id: organize
       if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
       run: |
-        cd openwrt/bin/targets/*/*
-        rm -rf packages
-        echo "FIRMWARE=$PWD" >> $GITHUB_ENV
-        echo "status=success" >> $GITHUB_OUTPUT
+        # 修复：使用通配符匹配实际路径
+        FIRMWARE_DIR=$(find openwrt/bin/targets -type d -name "filogic" | head -1)
+        if [ -d "$FIRMWARE_DIR" ]; then
+          cd "$FIRMWARE_DIR"
+          rm -rf packages
+          echo "FIRMWARE=$PWD" >> $GITHUB_ENV
+          echo "status=success" >> $GITHUB_OUTPUT
+        else
+          echo "::error::Firmware directory not found!"
+          exit 1
+        fi
     - name: Upload firmware artifact
       uses: actions/upload-artifact@main
       if: steps.organize.outputs.status == 'success' && !cancelled()
@@ -124,7 +127,7 @@ jobs:
       run: |
         echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
         echo "### EdgePI E87N MT7987A 无WiFi固件" > release.txt
-        echo "- 源码：Hiveton/higowrt v25.12.1 (OpenWrt 25.12.4)" >> release.txt
+        echo "- 源码：Hiveton/higowrt (OpenWrt 25.12.4)" >> release.txt
         echo "- CPU: MT7987A 8G eMMC 双NVME插槽 无内置WiFi" >> release.txt
         echo "- 编译时间: $(date +"%Y-%m-%d %H:%M:%S")" >> release.txt
         echo "status=success" >> $GITHUB_OUTPUT
