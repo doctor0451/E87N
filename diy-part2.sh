@@ -1,5 +1,5 @@
 #!/bin/bash
-# diy-part2.sh - E87N 专属定制 (彻底删除 WiFi 包)
+# diy-part2.sh - E87N 专属定制 (跳过 olddefconfig)
 
 OPENWRT_DIR="${GITHUB_WORKSPACE}/openwrt"
 if [ ! -d "$OPENWRT_DIR" ]; then
@@ -9,13 +9,13 @@ fi
 
 cd "$OPENWRT_DIR" || exit 1
 
-# --- 1. 物理删除所有 WiFi 相关包目录（关键步骤） ---
+# --- 1. 物理删除所有 WiFi 相关包目录 ---
 echo "### 1. 删除所有 WiFi 相关包 ###"
 WIFI_PACKAGES=(
     "package/mtk/drivers/mt_wifi7"
     "package/mtk/drivers/mt_hwifi"
     "package/mtk/drivers/mt_wifi_osal"
-    "package/mtk/drivers/warp"          # 这个包依赖 kmod-hw_nat
+    "package/mtk/drivers/warp"
     "package/mtk/drivers/wifi-profile"
 )
 
@@ -24,7 +24,6 @@ for pkg in "${WIFI_PACKAGES[@]}"; do
         echo "删除: $pkg"
         rm -rf "$pkg"
     fi
-    # 也删除可能存在的 .disabled 版本
     if [ -d "${pkg}.disabled" ]; then
         echo "删除: ${pkg}.disabled"
         rm -rf "${pkg}.disabled"
@@ -61,7 +60,7 @@ echo "### 4. 更新并安装 feeds ###"
 ./scripts/feeds update -a
 ./scripts/feeds install -a
 
-# --- 5. 再次删除可能重新出现的问题包 ---
+# --- 5. 二次清理问题包 ---
 echo "### 5. 二次清理问题包 ###"
 for pkg in "${PROBLEM_PACKAGES[@]}"; do
     if [ -d "$pkg" ]; then
@@ -113,8 +112,14 @@ else
     echo "警告: DTS目录不存在: $DTS_SRC"
 fi
 
-# --- 8. 验证关键目录 ---
-echo "### 8. 验证目录结构 ###"
-ls -la package/mtk/drivers/ | grep -v disabled || echo "mtk/drivers 目录已清理"
+# --- 8. 验证 .config 文件 ---
+echo "### 8. 验证配置 ###"
+if [ -f ".config" ]; then
+    echo ".config 文件大小: $(wc -c < .config) 字节"
+    grep -E "CONFIG_TARGET_mediatek|CONFIG_MTK_WIFI" .config | grep -v "^#" || echo "无相关配置"
+else
+    echo "错误: .config 文件不存在!"
+    exit 1
+fi
 
 echo "### diy-part2.sh 执行完成 ###"
