@@ -77,24 +77,24 @@ jobs:
         echo "=== 当前 .config 中的关键选项 ==="
         grep -E "(CONFIG_TARGET|CONFIG_MTK_WIFI|CONFIG_PACKAGE_kmod-mt)" .config | grep -v "^#" || echo "无关键选项"
         
+        # 显示 target/linux 目录内容
+        echo "=== target/linux/ 目录内容 ==="
+        ls -la target/linux/ || echo "target/linux/ 不存在"
+        
         # 显示 feeds 状态
         echo "=== feeds.conf.default 内容 ==="
         cat feeds.conf.default || echo "feeds.conf.default 不存在"
         
-        # 显示包目录状态
-        echo "=== package/feeds/ 目录内容 ==="
-        ls -la package/feeds/ 2>/dev/null || echo "package/feeds/ 不存在"
-        
-        # 尝试 olddefconfig，如果失败则查看详细错误
+        # 尝试 olddefconfig
         if ! make olddefconfig -j1; then
           echo "::error:: olddefconfig failed"
           make olddefconfig V=s 2>&1 | tee ../olddefconfig.log
           echo "=== olddefconfig 错误详情 ==="
           tail -200 ../olddefconfig.log
           
-          # 额外诊断：检查是否有 Kconfig 语法错误
-          echo "=== 检查 Kconfig 语法 ==="
-          find . -name "Kconfig" -exec echo "=== {} ===" \; -exec head -20 {} \; 2>/dev/null | head -100
+          # 显示当前目录结构
+          echo "=== 当前目录结构 (前3层) ==="
+          ls -laR | head -200
           exit 1
         fi
         
