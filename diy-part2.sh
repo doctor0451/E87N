@@ -1,5 +1,5 @@
 #!/bin/bash
-# diy-part2.sh - E87N 专属定制 (修复 hnat_nf_hook)
+# diy-part2.sh - E87N 专属定制 (最终修复版)
 
 OPENWRT_DIR="${GITHUB_WORKSPACE}/openwrt"
 if [ ! -d "$OPENWRT_DIR" ]; then
@@ -97,14 +97,18 @@ fi
 HNAT_NF_HOOK_C="${OPENWRT_DIR}/target/linux/mediatek/files-6.12/drivers/net/ethernet/mediatek/mtk_hnat/hnat_nf_hook.c"
 if [ -f "$HNAT_NF_HOOK_C" ]; then
     if ! grep -q "FIXED_BY_SCRIPT" "$HNAT_NF_HOOK_C"; then
-        echo "应用 hnat_nf_hook.c 补丁 (添加 static)..."
+        echo "应用 hnat_nf_hook.c 补丁..."
+        
+        # 添加 __maybe_unused 到 do_hnat_mape_w2l_fast
+        sed -i 's/^static unsigned int do_hnat_mape_w2l_fast(/static __maybe_unused unsigned int do_hnat_mape_w2l_fast(/g' "$HNAT_NF_HOOK_C"
+        
+        # 其他函数添加 static
         sed -i 's/^void ppd_dev_setting(/static void ppd_dev_setting(/g' "$HNAT_NF_HOOK_C"
         sed -i 's/^void foe_clear_entry(/static void foe_clear_entry(/g' "$HNAT_NF_HOOK_C"
         sed -i 's/^unsigned int mape_add_ipv6_hdr(/static unsigned int mape_add_ipv6_hdr(/g' "$HNAT_NF_HOOK_C"
         sed -i 's/^unsigned int do_hnat_ext_to_ge(/static unsigned int do_hnat_ext_to_ge(/g' "$HNAT_NF_HOOK_C"
         sed -i 's/^unsigned int do_hnat_ext_to_ge2(/static unsigned int do_hnat_ext_to_ge2(/g' "$HNAT_NF_HOOK_C"
         sed -i 's/^unsigned int do_hnat_ge_to_ext(/static unsigned int do_hnat_ge_to_ext(/g' "$HNAT_NF_HOOK_C"
-        sed -i 's/^unsigned int do_hnat_mape_w2l_fast(/static unsigned int do_hnat_mape_w2l_fast(/g' "$HNAT_NF_HOOK_C"
         sed -i 's/^void mtk_464xlat_pre_process(/static void mtk_464xlat_pre_process(/g' "$HNAT_NF_HOOK_C"
         sed -i 's/^struct foe_entry ppe_fill_L2_info(/static struct foe_entry ppe_fill_L2_info(/g' "$HNAT_NF_HOOK_C"
         sed -i 's/^struct foe_entry ppe_fill_info_blk(/static struct foe_entry ppe_fill_info_blk(/g' "$HNAT_NF_HOOK_C"
@@ -118,7 +122,7 @@ if [ -f "$HNAT_NF_HOOK_C" ]; then
         sed -i 's/^int mtk_464xlat_fill_l3(/static int mtk_464xlat_fill_l3(/g' "$HNAT_NF_HOOK_C"
         sed -i 's/^int mtk_464xlat_post_process(/static int mtk_464xlat_post_process(/g' "$HNAT_NF_HOOK_C"
         
-        sed -i '1i/* FIXED_BY_SCRIPT: 添加 static 修饰符 */' "$HNAT_NF_HOOK_C"
+        sed -i '1i/* FIXED_BY_SCRIPT: 添加 static 和 __maybe_unused */' "$HNAT_NF_HOOK_C"
         echo "hnat_nf_hook.c 补丁已应用"
     else
         echo "hnat_nf_hook.c 补丁已存在"
