@@ -1,5 +1,5 @@
 #!/bin/bash
-# diy-part2.sh - E87N 专属定制 (修复版)
+# diy-part2.sh - E87N 专属定制 (修复 hnat_nf_hook)
 
 OPENWRT_DIR="${GITHUB_WORKSPACE}/openwrt"
 if [ ! -d "$OPENWRT_DIR" ]; then
@@ -71,15 +71,14 @@ for pkg in "${PROBLEM_PACKAGES[@]}"; do
     fi
 done
 
-# --- 6. 修复 mtk_hnat 驱动编译错误 (使用健壮的 prepend 方式) ---
+# --- 6. 修复 mtk_hnat 驱动编译错误 ---
 echo "### 6. 修复 mtk_hnat 驱动编译错误 ###"
-HNAT_C="${OPENWRT_DIR}/target/linux/mediatek/files-6.12/drivers/net/ethernet/mediatek/mtk_hnat/hnat.c"
 
+# 修复 hnat.c
+HNAT_C="${OPENWRT_DIR}/target/linux/mediatek/files-6.12/drivers/net/ethernet/mediatek/mtk_hnat/hnat.c"
 if [ -f "$HNAT_C" ]; then
-    # 检查是否已修复
     if ! grep -q "FIXED_BY_SCRIPT" "$HNAT_C"; then
-        echo "应用 hnat 补丁 (prepend 方式)..."
-        # 创建包含头文件和函数声明的前置文件
+        echo "应用 hnat.c 补丁..."
         cat > "${HNAT_C}.pre" <<'EOF'
 /* FIXED_BY_SCRIPT: 确保 u32 已定义并添加函数原型 */
 #include <linux/types.h>
@@ -88,43 +87,51 @@ void mtk_set_pse_drop(u32 config);
 void hnat_cache_clr(u32 ppe_id);
 
 EOF
-        # 将原文件内容追加到前置文件
         cat "$HNAT_C" >> "${HNAT_C}.pre"
-        # 替换原文件
         mv "${HNAT_C}.pre" "$HNAT_C"
         echo "hnat.c 补丁已应用"
-    else
-        echo "hnat.c 补丁已存在"
-    fi
-else
-    echo "警告: hnat.c 文件不存在: $HNAT_C"
-    # 尝试查找其他位置
-    HNAT_C_ALT=$(find . -name "hnat.c" 2>/dev/null | head -1)
-    if [ -n "$HNAT_C_ALT" ] && [ -f "$HNAT_C_ALT" ]; then
-        echo "找到 hnat.c: $HNAT_C_ALT"
-        cat > "${HNAT_C_ALT}.pre" <<'EOF'
-/* FIXED_BY_SCRIPT: 确保 u32 已定义并添加函数原型 */
-#include <linux/types.h>
-
-void mtk_set_pse_drop(u32 config);
-void hnat_cache_clr(u32 ppe_id);
-
-EOF
-        cat "$HNAT_C_ALT" >> "${HNAT_C_ALT}.pre"
-        mv "${HNAT_C_ALT}.pre" "$HNAT_C_ALT"
-        echo "hnat.c 补丁已应用"
-    else
-        echo "错误: 找不到 hnat.c 文件"
     fi
 fi
 
-# --- 7. 安全设置目标配置 (处理 scripts/config 为目录的情况) ---
+# 修复 hnat_nf_hook.c
+HNAT_NF_HOOK_C="${OPENWRT_DIR}/target/linux/mediatek/files-6.12/drivers/net/ethernet/mediatek/mtk_hnat/hnat_nf_hook.c"
+if [ -f "$HNAT_NF_HOOK_C" ]; then
+    if ! grep -q "FIXED_BY_SCRIPT" "$HNAT_NF_HOOK_C"; then
+        echo "应用 hnat_nf_hook.c 补丁 (添加 static)..."
+        sed -i 's/^void ppd_dev_setting(/static void ppd_dev_setting(/g' "$HNAT_NF_HOOK_C"
+        sed -i 's/^void foe_clear_entry(/static void foe_clear_entry(/g' "$HNAT_NF_HOOK_C"
+        sed -i 's/^unsigned int mape_add_ipv6_hdr(/static unsigned int mape_add_ipv6_hdr(/g' "$HNAT_NF_HOOK_C"
+        sed -i 's/^unsigned int do_hnat_ext_to_ge(/static unsigned int do_hnat_ext_to_ge(/g' "$HNAT_NF_HOOK_C"
+        sed -i 's/^unsigned int do_hnat_ext_to_ge2(/static unsigned int do_hnat_ext_to_ge2(/g' "$HNAT_NF_HOOK_C"
+        sed -i 's/^unsigned int do_hnat_ge_to_ext(/static unsigned int do_hnat_ge_to_ext(/g' "$HNAT_NF_HOOK_C"
+        sed -i 's/^unsigned int do_hnat_mape_w2l_fast(/static unsigned int do_hnat_mape_w2l_fast(/g' "$HNAT_NF_HOOK_C"
+        sed -i 's/^void mtk_464xlat_pre_process(/static void mtk_464xlat_pre_process(/g' "$HNAT_NF_HOOK_C"
+        sed -i 's/^struct foe_entry ppe_fill_L2_info(/static struct foe_entry ppe_fill_L2_info(/g' "$HNAT_NF_HOOK_C"
+        sed -i 's/^struct foe_entry ppe_fill_info_blk(/static struct foe_entry ppe_fill_info_blk(/g' "$HNAT_NF_HOOK_C"
+        sed -i 's/^int mtk_464xlat_fill_mac(/static int mtk_464xlat_fill_mac(/g' "$HNAT_NF_HOOK_C"
+        sed -i 's/^int mtk_464xlat_get_hash(/static int mtk_464xlat_get_hash(/g' "$HNAT_NF_HOOK_C"
+        sed -i 's/^void mtk_464xlat_fill_info1(/static void mtk_464xlat_fill_info1(/g' "$HNAT_NF_HOOK_C"
+        sed -i 's/^void mtk_464xlat_fill_info2(/static void mtk_464xlat_fill_info2(/g' "$HNAT_NF_HOOK_C"
+        sed -i 's/^void mtk_464xlat_fill_ipv4(/static void mtk_464xlat_fill_ipv4(/g' "$HNAT_NF_HOOK_C"
+        sed -i 's/^int mtk_464xlat_fill_ipv6(/static int mtk_464xlat_fill_ipv6(/g' "$HNAT_NF_HOOK_C"
+        sed -i 's/^int mtk_464xlat_fill_l2(/static int mtk_464xlat_fill_l2(/g' "$HNAT_NF_HOOK_C"
+        sed -i 's/^int mtk_464xlat_fill_l3(/static int mtk_464xlat_fill_l3(/g' "$HNAT_NF_HOOK_C"
+        sed -i 's/^int mtk_464xlat_post_process(/static int mtk_464xlat_post_process(/g' "$HNAT_NF_HOOK_C"
+        
+        sed -i '1i/* FIXED_BY_SCRIPT: 添加 static 修饰符 */' "$HNAT_NF_HOOK_C"
+        echo "hnat_nf_hook.c 补丁已应用"
+    else
+        echo "hnat_nf_hook.c 补丁已存在"
+    fi
+else
+    echo "警告: hnat_nf_hook.c 文件不存在"
+fi
+
+# --- 7. 安全设置目标配置 ---
 echo "### 7. 设置目标配置 ###"
 
-# 生成初始配置
 make defconfig
 
-# 检查 scripts/config 是否可执行且不是目录
 if [ -x "./scripts/config" ] && [ ! -d "./scripts/config" ]; then
     echo "使用 scripts/config 设置构建选项"
     ./scripts/config --set-val CONFIG_TARGET_mediatek y
@@ -147,14 +154,12 @@ if [ -x "./scripts/config" ] && [ ! -d "./scripts/config" ]; then
     ./scripts/config --enable CONFIG_PACKAGE_kmod-thermal
     ./scripts/config --enable CONFIG_PACKAGE_kmod-spi-mediatek
 else
-    echo "scripts/config 不可执行或为目录，使用 .config 片段追加方式"
+    echo "scripts/config 不可执行，使用 .config 片段追加"
     cat >> .config <<'EOF'
-# 最小目标选择
 CONFIG_TARGET_mediatek=y
 CONFIG_TARGET_mediatek_filogic=y
 CONFIG_TARGET_mediatek_filogic_DEVICE_edgepi_e87n=y
 
-# 禁用 WiFi 包
 CONFIG_MTK_WIFI7_SUPPORT=n
 CONFIG_PACKAGE_kmod-mt7992-firmware=n
 CONFIG_PACKAGE_kmod-mt_wifi7=n
@@ -167,14 +172,12 @@ CONFIG_PACKAGE_iwinfo=n
 CONFIG_PACKAGE_hostapd-common=n
 CONFIG_PACKAGE_wpad-basic=n
 
-# 确保必要的驱动
 CONFIG_PACKAGE_kmod-pwm=y
 CONFIG_PACKAGE_kmod-thermal=y
 CONFIG_PACKAGE_kmod-spi-mediatek=y
 EOF
 fi
 
-# 生成完整配置
 make defconfig
 
 # --- 8. 复制 E87N DTS 文件 ---
