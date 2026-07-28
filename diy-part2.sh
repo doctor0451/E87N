@@ -1,5 +1,5 @@
 #!/bin/bash
-# diy-part2.sh - E87N 专属定制 (跳过 olddefconfig)
+# diy-part2.sh - E87N 专属定制 (包含 hnat 补丁)
 
 OPENWRT_DIR="${GITHUB_WORKSPACE}/openwrt"
 if [ ! -d "$OPENWRT_DIR" ]; then
@@ -46,8 +46,26 @@ for pkg in "${PROBLEM_PACKAGES[@]}"; do
     fi
 done
 
-# --- 3. 重置 feeds 为最简配置 ---
-echo "### 3. 重置 feeds 配置 ###"
+# --- 3. 修复 mtk_hnat 驱动编译错误 ---
+echo "### 3. 修复 mtk_hnat 驱动编译错误 ###"
+HNAT_C="${OPENWRT_DIR}/target/linux/mediatek/files-6.12/drivers/net/ethernet/mediatek/mtk_hnat/hnat.c"
+
+if [ -f "$HNAT_C" ]; then
+    # 检查是否已经修复
+    if ! grep -q "void mtk_set_pse_drop(u32 config);" "$HNAT_C"; then
+        echo "应用 hnat 补丁..."
+        # 在文件开头添加函数声明
+        sed -i '1i\/* 修复 missing-prototypes 错误 */\nvoid mtk_set_pse_drop(u32 config);\nvoid hnat_cache_clr(u32 ppe_id);\n' "$HNAT_C"
+        echo "hnat 补丁已应用"
+    else
+        echo "hnat 补丁已存在"
+    fi
+else
+    echo "警告: hnat.c 文件不存在: $HNAT_C"
+fi
+
+# --- 4. 重置 feeds 为最简配置 ---
+echo "### 4. 重置 feeds 配置 ###"
 cat > feeds.conf.default << 'EOF'
 # 最简 feeds - 只使用官方核心源
 src-git packages https://git.openwrt.org/feed/packages.git
@@ -55,13 +73,13 @@ src-git luci https://git.openwrt.org/project/luci.git
 src-git routing https://git.openwrt.org/feed/routing.git
 EOF
 
-# --- 4. 更新并安装 feeds ---
-echo "### 4. 更新并安装 feeds ###"
+# --- 5. 更新并安装 feeds ---
+echo "### 5. 更新并安装 feeds ###"
 ./scripts/feeds update -a
 ./scripts/feeds install -a
 
-# --- 5. 二次清理问题包 ---
-echo "### 5. 二次清理问题包 ###"
+# --- 6. 二次清理问题包 ---
+echo "### 6. 二次清理问题包 ###"
 for pkg in "${PROBLEM_PACKAGES[@]}"; do
     if [ -d "$pkg" ]; then
         echo "二次删除: $pkg"
@@ -69,8 +87,8 @@ for pkg in "${PROBLEM_PACKAGES[@]}"; do
     fi
 done
 
-# --- 6. 设置目标并生成配置 ---
-echo "### 6. 生成目标配置 ###"
+# --- 7. 设置目标并生成配置 ---
+echo "### 7. 生成目标配置 ###"
 
 # 强制设置目标为 E87N
 ./scripts/config --set-val CONFIG_TARGET_mediatek y
@@ -98,8 +116,8 @@ echo "### 6. 生成目标配置 ###"
 # 生成配置
 make defconfig
 
-# --- 7. 复制 E87N DTS 文件 ---
-echo "### 7. 复制 E87N DTS 文件 ###"
+# --- 8. 复制 E87N DTS 文件 ---
+echo "### 8. 复制 E87N DTS 文件 ###"
 DTS_SRC="${GITHUB_WORKSPACE}/DTS"
 DTS_DST="${OPENWRT_DIR}/target/linux/mediatek/dts"
 
@@ -112,8 +130,8 @@ else
     echo "警告: DTS目录不存在: $DTS_SRC"
 fi
 
-# --- 8. 验证 .config 文件 ---
-echo "### 8. 验证配置 ###"
+# --- 9. 验证 .config 文件 ---
+echo "### 9. 验证配置 ###"
 if [ -f ".config" ]; then
     echo ".config 文件大小: $(wc -c < .config) 字节"
     grep -E "CONFIG_TARGET_mediatek|CONFIG_MTK_WIFI" .config | grep -v "^#" || echo "无相关配置"
