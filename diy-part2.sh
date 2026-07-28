@@ -1,5 +1,5 @@
 #!/bin/bash
-# diy-part2.sh - E87N 专属定制 (Makefile 方案)
+# diy-part2.sh - E87N 专属定制 (最终版)
 
 OPENWRT_DIR="${GITHUB_WORKSPACE}/openwrt"
 if [ ! -d "$OPENWRT_DIR" ]; then
@@ -72,14 +72,12 @@ for pkg in "${PROBLEM_PACKAGES[@]}"; do
 done
 
 # --- 6. 在 mtk_hnat Makefile 中禁用警告 ---
-echo "### 6. 在 mtk_hnat Makefile 中禁用 -Wmissing-prototypes 和 -Wunused-function ###"
+echo "### 6. 在 mtk_hnat Makefile 中禁用警告 ###"
 
-# 查找 mtk_hnat 的 Makefile
 HNAT_MAKEFILE=""
 for path in \
     "target/linux/mediatek/files-6.12/drivers/net/ethernet/mediatek/mtk_hnat/Makefile" \
     "target/linux/mediatek/files-6.12/drivers/net/ethernet/mtk_hnat/Makefile" \
-    "target/linux/mediatek/files/drivers/net/ethernet/mediatek/mtk_hnat/Makefile" \
     ; do
     if [ -f "${OPENWRT_DIR}/${path}" ]; then
         HNAT_MAKEFILE="${OPENWRT_DIR}/${path}"
@@ -87,7 +85,6 @@ for path in \
     fi
 done
 
-# 如果找不到，用 find 搜索
 if [ -z "$HNAT_MAKEFILE" ]; then
     HNAT_MAKEFILE=$(find "${OPENWRT_DIR}/target/linux" -path "*/mtk_hnat/Makefile" 2>/dev/null | head -1)
 fi
@@ -95,7 +92,7 @@ fi
 if [ -f "$HNAT_MAKEFILE" ]; then
     if ! grep -q "Wno-missing-prototypes" "$HNAT_MAKEFILE"; then
         echo "修改 Makefile: $HNAT_MAKEFILE"
-        echo -e "\n# 禁用驱动中的原型和未使用函数警告（这些警告被 -Werror 视为错误）" >> "$HNAT_MAKEFILE"
+        echo -e "\n# 禁用驱动中的警告（这些警告被 -Werror 视为错误）" >> "$HNAT_MAKEFILE"
         echo "ccflags-y += -Wno-missing-prototypes -Wno-unused-function" >> "$HNAT_MAKEFILE"
         echo "Makefile 已修改"
     else
@@ -105,8 +102,8 @@ else
     echo "警告: 找不到 mtk_hnat/Makefile"
 fi
 
-# --- 7. 修复 hnat.c 的 u32 类型问题（必须修复，无法通过 Makefile 解决） ---
-echo "### 7. 修复 hnat.c 的 u32 类型问题 ###"
+# --- 7. 修复 hnat.c 的 static 问题 ---
+echo "### 7. 修复 hnat.c 的 static 问题 ###"
 HNAT_C=""
 for path in \
     "target/linux/mediatek/files-6.12/drivers/net/ethernet/mediatek/mtk_hnat/hnat.c" \
@@ -125,13 +122,24 @@ fi
 if [ -f "$HNAT_C" ]; then
     if ! grep -q "FIXED_BY_SCRIPT" "$HNAT_C"; then
         echo "修复 hnat.c: $HNAT_C"
+        
+        # 在文件开头添加头文件和 static 声明
         cat > "${HNAT_C}.pre" <<'EOF'
-/* FIXED_BY_SCRIPT: 确保 u32 已定义 */
+/* FIXED_BY_SCRIPT: 确保 u32 已定义，并将函数标记为 static */
 #include <linux/types.h>
+
+/* 声明为 static，避免 -Wmissing-declarations */
+static void mtk_set_pse_drop(u32 config);
+static void hnat_cache_clr(u32 ppe_id);
 
 EOF
         cat "$HNAT_C" >> "${HNAT_C}.pre"
         mv "${HNAT_C}.pre" "$HNAT_C"
+        
+        # 将函数定义从 void 改为 static void
+        sed -i 's/^void mtk_set_pse_drop(/static void mtk_set_pse_drop(/g' "$HNAT_C")
+        sed -i 's/^void hnat_cache_clr(/static void hnat_cache_clr(/g' "$HNAT_C")
+        
         echo "hnat.c 已修复"
     else
         echo "hnat.c 已包含修复"
