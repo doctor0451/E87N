@@ -1,5 +1,7 @@
 #!/bin/bash
-# diy-part2.sh - E87N 专属定制 (最终完整版)
+# diy-part2.sh - E87N 专属定制 (最终语法修复版)
+
+set -e  # 遇到错误立即退出
 
 OPENWRT_DIR="${GITHUB_WORKSPACE}/openwrt"
 if [ ! -d "$OPENWRT_DIR" ]; then
@@ -134,8 +136,9 @@ EOF
         cat "$HNAT_C" >> "${HNAT_C}.pre"
         mv "${HNAT_C}.pre" "$HNAT_C"
         
-        sed -i 's|^void mtk_set_pse_drop(|static void mtk_set_pse_drop(|g' "$HNAT_C")
-        sed -i 's|^void hnat_cache_clr(|static void hnat_cache_clr(|g' "$HNAT_C")
+        # 修复：移除多余的 ) 并转义 ( 
+        sed -i 's|^void mtk_set_pse_drop\(|static void mtk_set_pse_drop(|g' "$HNAT_C"
+        sed -i 's|^void hnat_cache_clr\(|static void hnat_cache_clr(|g' "$HNAT_C"
         
         echo "hnat.c 已修复"
     else
@@ -168,25 +171,26 @@ if [ -f "$HNAT_NF_HOOK_C" ]; then
         
         sed -i '1i/* FIXED_BY_SCRIPT: 将内部函数标记为 static */' "$HNAT_NF_HOOK_C"
         
-        sed -i 's|^void ppd_dev_setting(|static void ppd_dev_setting(|g' "$HNAT_NF_HOOK_C")
-        sed -i 's|^void foe_clear_entry(|static void foe_clear_entry(|g' "$HNAT_NF_HOOK_C")
-        sed -i 's|^unsigned int mape_add_ipv6_hdr(|static unsigned int mape_add_ipv6_hdr(|g' "$HNAT_NF_HOOK_C")
-        sed -i 's|^unsigned int do_hnat_ext_to_ge(|static unsigned int do_hnat_ext_to_ge(|g' "$HNAT_NF_HOOK_C")
-        sed -i 's|^unsigned int do_hnat_ext_to_ge2(|static unsigned int do_hnat_ext_to_ge2(|g' "$HNAT_NF_HOOK_C")
-        sed -i 's|^unsigned int do_hnat_ge_to_ext(|static unsigned int do_hnat_ge_to_ext(|g' "$HNAT_NF_HOOK_C")
-        sed -i 's|^unsigned int do_hnat_mape_w2l_fast(|static unsigned int do_hnat_mape_w2l_fast(|g' "$HNAT_NF_HOOK_C")
-        sed -i 's|^void mtk_464xlat_pre_process(|static void mtk_464xlat_pre_process(|g' "$HNAT_NF_HOOK_C")
-        sed -i 's|^struct foe_entry ppe_fill_L2_info(|static struct foe_entry ppe_fill_L2_info(|g' "$HNAT_NF_HOOK_C")
-        sed -i 's|^struct foe_entry ppe_fill_info_blk(|static struct foe_entry ppe_fill_info_blk(|g' "$HNAT_NF_HOOK_C")
-        sed -i 's|^int mtk_464xlat_fill_mac(|static int mtk_464xlat_fill_mac(|g' "$HNAT_NF_HOOK_C")
-        sed -i 's|^int mtk_464xlat_get_hash(|static int mtk_464xlat_get_hash(|g' "$HNAT_NF_HOOK_C")
-        sed -i 's|^void mtk_464xlat_fill_info1(|static void mtk_464xlat_fill_info1(|g' "$HNAT_NF_HOOK_C")
-        sed -i 's|^void mtk_464xlat_fill_info2(|static void mtk_464xlat_fill_info2(|g' "$HNAT_NF_HOOK_C")
-        sed -i 's|^void mtk_464xlat_fill_ipv4(|static void mtk_464xlat_fill_ipv4(|g' "$HNAT_NF_HOOK_C")
-        sed -i 's|^int mtk_464xlat_fill_ipv6(|static int mtk_464xlat_fill_ipv6(|g' "$HNAT_NF_HOOK_C")
-        sed -i 's|^int mtk_464xlat_fill_l2(|static int mtk_464xlat_fill_l2(|g' "$HNAT_NF_HOOK_C")
-        sed -i 's|^int mtk_464xlat_fill_l3(|static int mtk_464xlat_fill_l3(|g' "$HNAT_NF_HOOK_C")
-        sed -i 's|^int mtk_464xlat_post_process(|static int mtk_464xlat_post_process(|g' "$HNAT_NF_HOOK_C")
+        # 使用转义的 ( 避免 shell 解析问题
+        sed -i 's|^void ppd_dev_setting\(|static void ppd_dev_setting(|g' "$HNAT_NF_HOOK_C"
+        sed -i 's|^void foe_clear_entry\(|static void foe_clear_entry(|g' "$HNAT_NF_HOOK_C")
+        sed -i 's|^unsigned int mape_add_ipv6_hdr\(|static unsigned int mape_add_ipv6_hdr(|g' "$HNAT_NF_HOOK_C")
+        sed -i 's|^unsigned int do_hnat_ext_to_ge\(|static unsigned int do_hnat_ext_to_ge(|g' "$HNAT_NF_HOOK_C")
+        sed -i 's|^unsigned int do_hnat_ext_to_ge2\(|static unsigned int do_hnat_ext_to_ge2(|g' "$HNAT_NF_HOOK_C")
+        sed -i 's|^unsigned int do_hnat_ge_to_ext\(|static unsigned int do_hnat_ge_to_ext(|g' "$HNAT_NF_HOOK_C")
+        sed -i 's|^unsigned int do_hnat_mape_w2l_fast\(|static unsigned int do_hnat_mape_w2l_fast(|g' "$HNAT_NF_HOOK_C")
+        sed -i 's|^void mtk_464xlat_pre_process\(|static void mtk_464xlat_pre_process(|g' "$HNAT_NF_HOOK_C")
+        sed -i 's|^struct foe_entry ppe_fill_L2_info\(|static struct foe_entry ppe_fill_L2_info(|g' "$HNAT_NF_HOOK_C")
+        sed -i 's|^struct foe_entry ppe_fill_info_blk\(|static struct foe_entry ppe_fill_info_blk(|g' "$HNAT_NF_HOOK_C")
+        sed -i 's|^int mtk_464xlat_fill_mac\(|static int mtk_464xlat_fill_mac(|g' "$HNAT_NF_HOOK_C")
+        sed -i 's|^int mtk_464xlat_get_hash\(|static int mtk_464xlat_get_hash(|g' "$HNAT_NF_HOOK_C")
+        sed -i 's|^void mtk_464xlat_fill_info1\(|static void mtk_464xlat_fill_info1(|g' "$HNAT_NF_HOOK_C")
+        sed -i 's|^void mtk_464xlat_fill_info2\(|static void mtk_464xlat_fill_info2(|g' "$HNAT_NF_HOOK_C")
+        sed -i 's|^void mtk_464xlat_fill_ipv4\(|static void mtk_464xlat_fill_ipv4(|g' "$HNAT_NF_HOOK_C")
+        sed -i 's|^int mtk_464xlat_fill_ipv6\(|static int mtk_464xlat_fill_ipv6(|g' "$HNAT_NF_HOOK_C")
+        sed -i 's|^int mtk_464xlat_fill_l2\(|static int mtk_464xlat_fill_l2(|g' "$HNAT_NF_HOOK_C")
+        sed -i 's|^int mtk_464xlat_fill_l3\(|static int mtk_464xlat_fill_l3(|g' "$HNAT_NF_HOOK_C")
+        sed -i 's|^int mtk_464xlat_post_process\(|static int mtk_464xlat_post_process(|g' "$HNAT_NF_HOOK_C")
         
         echo "hnat_nf_hook.c 已修复"
     else
