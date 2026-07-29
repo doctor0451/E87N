@@ -26,7 +26,7 @@ on:
 env:
   CONFIG_FILE: "config/xg-040g-md-immortalwrt.config"
   REPO_URL: https://github.com/immortalwrt/immortalwrt.git
-  REPO_BRANCH: master
+  REPO_BRANCH: v25.12.1   # 👈 这里改成了正确的 tag 名
   UPLOAD_FIRMWARE: true
   UPLOAD_RELEASE: true
   KEEP_RELEASES: 20
