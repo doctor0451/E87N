@@ -1,266 +1,251 @@
-#!/bin/bash
-# diy-part2.sh - E87N 专属定制 (最终完整版)
+name: Build_XG_040G_MD_ImmortalWrt
 
-OPENWRT_DIR="${GITHUB_WORKSPACE}/openwrt"
-if [ ! -d "$OPENWRT_DIR" ]; then
-    echo "错误: openwrt 目录不存在: $OPENWRT_DIR"
-    exit 1
-fi
+permissions:
+  contents: write
+  actions: write
 
-cd "$OPENWRT_DIR" || exit 1
+on:
+  workflow_dispatch:
+    inputs:
+      log_switch:
+        description: "Build logs"
+        required: false
+        default: false
+        type: boolean
+  schedule:
+    # 02:00 Asia/Shanghai = 18:00 UTC (previous day)
+    - cron: "0 18 * * *"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/xg-040g-md-immortalwrt.yml"
+      - "config/xg-040g-md-immortalwrt.config"
+      - "scripts/**"
 
-# --- 1. 删除所有 WiFi 相关包 ---
-echo "### 1. 删除所有 WiFi 相关包 ###"
-WIFI_PACKAGES=(
-    "package/mtk/drivers/mt_wifi7"
-    "package/mtk/drivers/mt_hwifi"
-    "package/mtk/drivers/mt_wifi_osal"
-    "package/mtk/drivers/warp"
-    "package/mtk/drivers/wifi-profile"
-)
+env:
+  CONFIG_FILE: "config/xg-040g-md-immortalwrt.config"
+  REPO_URL: https://github.com/immortalwrt/immortalwrt.git
+  REPO_BRANCH: master
+  UPLOAD_FIRMWARE: true
+  UPLOAD_RELEASE: true
+  KEEP_RELEASES: 20
+  KEEP_RELEASE_MARKER: "[keep-release]"
+  CCACHE_DIR: /mnt/immortalwrt/ccache
+  CCACHE_MAXSIZE: 5G
+  TZ: Asia/Shanghai
 
-for pkg in "${WIFI_PACKAGES[@]}"; do
-    if [ -d "$pkg" ]; then
-        echo "删除: $pkg"
-        rm -rf "$pkg"
-    fi
-    if [ -d "${pkg}.disabled" ]; then
-        echo "删除: ${pkg}.disabled"
-        rm -rf "${pkg}.disabled"
-    fi
-done
+jobs:
+  build:
+    runs-on: ubuntu-latest
 
-# --- 2. 删除有问题的 feeds 包 ---
-echo "### 2. 删除有问题的 feeds 包 ###"
-PROBLEM_PACKAGES=(
-    "package/feeds/helloworld/luci-app-ssr-plus"
-    "package/feeds/packages/nfs-kernel-server"
-    "package/feeds/packages/onionshare-cli"
-    "package/feeds/luci/luci-app-mjpg-streamer"
-    "package/feeds/packages/net/freeradius3"
-    "package/feeds/packages/net/nftables"
-)
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
 
-for pkg in "${PROBLEM_PACKAGES[@]}"; do
-    if [ -d "$pkg" ]; then
-        echo "删除: $pkg"
-        rm -rf "$pkg"
-    fi
-done
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
 
-# --- 3. 重置 feeds 配置 ---
-echo "### 3. 重置 feeds 配置 ###"
-cat > feeds.conf.default << 'EOF'
-# 最简 feeds - 只使用官方核心源
-src-git packages https://git.openwrt.org/feed/packages.git
-src-git luci https://git.openwrt.org/project/luci.git
-src-git routing https://git.openwrt.org/feed/routing.git
-EOF
+      - name: Space usage check
+        run: df -h
 
-# --- 4. 更新并安装 feeds ---
-echo "### 4. 更新并安装 feeds ###"
-./scripts/feeds update -a
-./scripts/feeds install -a
+      - name: Setup environment dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
+          TZ: ${{ env.TZ }}
+        run: |
+          sudo apt update
+          sudo apt purge -y python3-distutils || true
+          sudo apt autoremove -y
+          sudo apt install -y \
+            build-essential clang flex bison g++ gawk \
+            gcc-multilib g++-multilib gettext git libncurses5-dev libssl-dev \
+            python3-setuptools rsync swig unzip zlib1g-dev file wget \
+            mkbootimg device-tree-compiler ccache
 
-# --- 5. 二次清理问题包 ---
-echo "### 5. 二次清理问题包 ###"
-for pkg in "${PROBLEM_PACKAGES[@]}"; do
-    if [ -d "$pkg" ]; then
-        echo "二次删除: $pkg"
-        rm -rf "$pkg"
-    fi
-done
+          if command -v mkbootimg >/dev/null 2>&1; then
+            echo "mkbootimg found at: $(command -v mkbootimg)"
+          else
+            echo "mkbootimg not found in PATH!"
+          fi
 
-# --- 6. 在 mtk_hnat Makefile 中禁用警告 ---
-echo "### 6. 在 mtk_hnat Makefile 中禁用警告 ###"
+          if [[ -n "$TZ" ]]; then
+            sudo timedatectl set-timezone "$TZ"
+          else
+            echo "TZ is not set, skipping timezone setup."
+          fi
 
-HNAT_MAKEFILE=""
-for path in \
-    "target/linux/mediatek/files-6.12/drivers/net/ethernet/mediatek/mtk_hnat/Makefile" \
-    "target/linux/mediatek/files-6.12/drivers/net/ethernet/mtk_hnat/Makefile" \
-    ; do
-    if [ -f "${OPENWRT_DIR}/${path}" ]; then
-        HNAT_MAKEFILE="${OPENWRT_DIR}/${path}"
-        break
-    fi
-done
+      - name: Ensure Python build tools
+        run: |
+          python3 -m pip install --upgrade pip setuptools wheel
+          python3 -m pip install Unidecode
 
-if [ -z "$HNAT_MAKEFILE" ]; then
-    HNAT_MAKEFILE=$(find "${OPENWRT_DIR}/target/linux" -path "*/mtk_hnat/Makefile" 2>/dev/null | head -1)
-fi
+      - name: Clone ImmortalWrt source code
+        run: |
+          git clone --depth 1 --branch "$REPO_BRANCH" "$REPO_URL" openwrt
 
-if [ -f "$HNAT_MAKEFILE" ]; then
-    if ! grep -q "Wno-missing-prototypes" "$HNAT_MAKEFILE"; then
-        echo "修改 Makefile: $HNAT_MAKEFILE"
-        echo -e "\n# 禁用驱动中的警告（这些警告被 -Werror 视为错误）" >> "$HNAT_MAKEFILE"
-        echo "ccflags-y += -Wno-missing-prototypes -Wno-unused-function" >> "$HNAT_MAKEFILE"
-        echo "Makefile 已修改"
-    else
-        echo "Makefile 已包含编译标志"
-    fi
-else
-    echo "警告: 找不到 mtk_hnat/Makefile"
-fi
+      - name: Move build dirs to /mnt/immortalwrt
+        run: |
+          sudo mkdir -p /mnt/immortalwrt/{dl,staging_dir,build_dir,ccache}
+          sudo chown -R "$USER:$(id -gn)" /mnt/immortalwrt
+          rm -rf openwrt/dl openwrt/staging_dir openwrt/build_dir
+          ln -sfn /mnt/immortalwrt/dl openwrt/dl
+          ln -sfn /mnt/immortalwrt/staging_dir openwrt/staging_dir
+          ln -sfn /mnt/immortalwrt/build_dir openwrt/build_dir
+          df -h
 
-# --- 7. 修复 hnat.c 的 static 问题 ---
-echo "### 7. 修复 hnat.c 的 static 问题 ###"
-HNAT_C=""
-for path in \
-    "target/linux/mediatek/files-6.12/drivers/net/ethernet/mediatek/mtk_hnat/hnat.c" \
-    "target/linux/mediatek/files-6.12/drivers/net/ethernet/mtk_hnat/hnat.c" \
-    ; do
-    if [ -f "${OPENWRT_DIR}/${path}" ]; then
-        HNAT_C="${OPENWRT_DIR}/${path}"
-        break
-    fi
-done
+      - name: Restore dl cache
+        uses: actions/cache@v4
+        with:
+          path: /mnt/immortalwrt/dl
+          key: ${{ runner.os }}-immortalwrt-${{ env.REPO_BRANCH }}-dl-${{ hashFiles('config/xg-040g-md-immortalwrt.config') }}
+          restore-keys: |
+            ${{ runner.os }}-immortalwrt-${{ env.REPO_BRANCH }}-dl-
 
-if [ -z "$HNAT_C" ]; then
-    HNAT_C=$(find "${OPENWRT_DIR}/target/linux" -name "hnat.c" -path "*/mtk_hnat/*" 2>/dev/null | head -1)
-fi
+      - name: Restore ccache
+        uses: actions/cache/restore@v4
+        with:
+          path: /mnt/immortalwrt/ccache
+          key: ${{ runner.os }}-immortalwrt-${{ env.REPO_BRANCH }}-ccache-v2-${{ github.run_id }}
+          restore-keys: |
+            ${{ runner.os }}-immortalwrt-${{ env.REPO_BRANCH }}-ccache-v2-
 
-if [ -f "$HNAT_C" ]; then
-    if ! grep -q "FIXED_BY_SCRIPT" "$HNAT_C"; then
-        echo "修复 hnat.c: $HNAT_C"
-        
-        cat > "${HNAT_C}.pre" <<'EOF'
-/* FIXED_BY_SCRIPT: 确保 u32 已定义，并将函数标记为 static */
-#include <linux/types.h>
+      - name: Setup ccache
+        run: |
+          mkdir -p "$CCACHE_DIR"
+          ccache -M "$CCACHE_MAXSIZE"
+          echo "ccache dir: $CCACHE_DIR"
+          ccache -s
 
-static void mtk_set_pse_drop(u32 config);
-static void hnat_cache_clr(u32 ppe_id);
+      - name: Update & Install feeds
+        working-directory: ./openwrt
+        run: |
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a -f
 
-EOF
-        cat "$HNAT_C" >> "${HNAT_C}.pre"
-        mv "${HNAT_C}.pre" "$HNAT_C"
-        
-        sed -i 's|^void mtk_set_pse_drop(|static void mtk_set_pse_drop(|g' "$HNAT_C")
-        sed -i 's|^void hnat_cache_clr(|static void hnat_cache_clr(|g' "$HNAT_C")
-        
-        echo "hnat.c 已修复"
-    else
-        echo "hnat.c 已包含修复"
-    fi
-else
-    echo "警告: 找不到 hnat.c"
-fi
+      - name: Install third-party packages
+        working-directory: ./openwrt/package
+        run: |
+          chmod +x "$GITHUB_WORKSPACE/scripts/update-packages.sh"
+          bash "$GITHUB_WORKSPACE/scripts/update-packages.sh"
 
-# --- 8. 修复 hnat_nf_hook.c 的 static 问题 ---
-echo "### 8. 修复 hnat_nf_hook.c 的 static 问题 ###"
-HNAT_NF_HOOK_C=""
-for path in \
-    "target/linux/mediatek/files-6.12/drivers/net/ethernet/mediatek/mtk_hnat/hnat_nf_hook.c" \
-    "target/linux/mediatek/files-6.12/drivers/net/ethernet/mtk_hnat/hnat_nf_hook.c" \
-    ; do
-    if [ -f "${OPENWRT_DIR}/${path}" ]; then
-        HNAT_NF_HOOK_C="${OPENWRT_DIR}/${path}"
-        break
-    fi
-done
+      - name: Copy configuration and defconfig
+        run: |
+          cp -fv "${CONFIG_FILE}" openwrt/.config
+          cd openwrt
+          make defconfig
+          [ -e .config ] && cp .config defconfig-final.config
 
-if [ -z "$HNAT_NF_HOOK_C" ]; then
-    HNAT_NF_HOOK_C=$(find "${OPENWRT_DIR}/target/linux" -name "hnat_nf_hook.c" -path "*/mtk_hnat/*" 2>/dev/null | head -1)
-fi
+      - name: Upload build config files
+        uses: actions/upload-artifact@v6
+        with:
+          name: immortalwrt-build-config
+          path: |
+            config/xg-040g-md-immortalwrt.config
+            openwrt/defconfig-final.config
+            openwrt/feeds.conf.default
 
-if [ -f "$HNAT_NF_HOOK_C" ]; then
-    if ! grep -q "FIXED_BY_SCRIPT" "$HNAT_NF_HOOK_C"; then
-        echo "修复 hnat_nf_hook.c: $HNAT_NF_HOOK_C"
-        
-        sed -i '1i/* FIXED_BY_SCRIPT: 将内部函数标记为 static */' "$HNAT_NF_HOOK_C"
-        
-        sed -i 's|^void ppd_dev_setting(|static void ppd_dev_setting(|g' "$HNAT_NF_HOOK_C")
-        sed -i 's|^void foe_clear_entry(|static void foe_clear_entry(|g' "$HNAT_NF_HOOK_C")
-        sed -i 's|^unsigned int mape_add_ipv6_hdr(|static unsigned int mape_add_ipv6_hdr(|g' "$HNAT_NF_HOOK_C")
-        sed -i 's|^unsigned int do_hnat_ext_to_ge(|static unsigned int do_hnat_ext_to_ge(|g' "$HNAT_NF_HOOK_C")
-        sed -i 's|^unsigned int do_hnat_ext_to_ge2(|static unsigned int do_hnat_ext_to_ge2(|g' "$HNAT_NF_HOOK_C")
-        sed -i 's|^unsigned int do_hnat_ge_to_ext(|static unsigned int do_hnat_ge_to_ext(|g' "$HNAT_NF_HOOK_C")
-        sed -i 's|^unsigned int do_hnat_mape_w2l_fast(|static unsigned int do_hnat_mape_w2l_fast(|g' "$HNAT_NF_HOOK_C")
-        sed -i 's|^void mtk_464xlat_pre_process(|static void mtk_464xlat_pre_process(|g' "$HNAT_NF_HOOK_C")
-        sed -i 's|^struct foe_entry ppe_fill_L2_info(|static struct foe_entry ppe_fill_L2_info(|g' "$HNAT_NF_HOOK_C")
-        sed -i 's|^struct foe_entry ppe_fill_info_blk(|static struct foe_entry ppe_fill_info_blk(|g' "$HNAT_NF_HOOK_C")
-        sed -i 's|^int mtk_464xlat_fill_mac(|static int mtk_464xlat_fill_mac(|g' "$HNAT_NF_HOOK_C")
-        sed -i 's|^int mtk_464xlat_get_hash(|static int mtk_464xlat_get_hash(|g' "$HNAT_NF_HOOK_C")
-        sed -i 's|^void mtk_464xlat_fill_info1(|static void mtk_464xlat_fill_info1(|g' "$HNAT_NF_HOOK_C")
-        sed -i 's|^void mtk_464xlat_fill_info2(|static void mtk_464xlat_fill_info2(|g' "$HNAT_NF_HOOK_C")
-        sed -i 's|^void mtk_464xlat_fill_ipv4(|static void mtk_464xlat_fill_ipv4(|g' "$HNAT_NF_HOOK_C")
-        sed -i 's|^int mtk_464xlat_fill_ipv6(|static int mtk_464xlat_fill_ipv6(|g' "$HNAT_NF_HOOK_C")
-        sed -i 's|^int mtk_464xlat_fill_l2(|static int mtk_464xlat_fill_l2(|g' "$HNAT_NF_HOOK_C")
-        sed -i 's|^int mtk_464xlat_fill_l3(|static int mtk_464xlat_fill_l3(|g' "$HNAT_NF_HOOK_C")
-        sed -i 's|^int mtk_464xlat_post_process(|static int mtk_464xlat_post_process(|g' "$HNAT_NF_HOOK_C")
-        
-        echo "hnat_nf_hook.c 已修复"
-    else
-        echo "hnat_nf_hook.c 已包含修复"
-    fi
-else
-    echo "警告: 找不到 hnat_nf_hook.c"
-fi
+      - name: Download packages
+        working-directory: ./openwrt
+        run: |
+          make download -j4 V=s
+          find dl -size -1024c -delete
 
-# --- 9. 设置目标配置 ---
-echo "### 9. 设置目标配置 ###"
+      - name: Compile ImmortalWrt firmware
+        id: compile
+        run: |
+          cd openwrt
+          echo "Disk usage before compile:"
+          df -h
+          if [[ "${{ inputs.log_switch }}" == "true" ]]; then
+            make -j1 V=s || {
+              echo "Compile failed, disk usage diagnostics:"
+              df -h
+              du -h -d1 . | sort -h | tail -n 30
+              exit 1
+            }
+          else
+            make -j$(nproc) || {
+              echo "Compile failed, disk usage diagnostics:"
+              df -h
+              du -h -d1 . | sort -h | tail -n 30
+              exit 1
+            }
+          fi
+          DEVICE_NAME=$(grep -o 'CONFIG_TARGET.*DEVICE_[^=]*=y' .config | head -1 | sed 's/.*DEVICE_\(.*\)=y/\1/')
+          if [[ -n "$DEVICE_NAME" ]]; then
+            echo "DEVICE_NAME=_${DEVICE_NAME}" >> "$GITHUB_ENV"
+          fi
+          echo "FILE_DATE=_$(date +%Y%m%d%H%M)" >> "$GITHUB_ENV"
+          echo "status=success" >> "$GITHUB_OUTPUT"
+          echo "ccache stats (env CCACHE_DIR=$CCACHE_DIR):"
+          ccache -s || true
 
-make defconfig
+      - name: Save ccache
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: /mnt/immortalwrt/ccache
+          key: ${{ runner.os }}-immortalwrt-${{ env.REPO_BRANCH }}-ccache-v2-${{ github.run_id }}
 
-if [ -x "./scripts/config" ] && [ ! -d "./scripts/config" ]; then
-    echo "使用 scripts/config 设置构建选项"
-    ./scripts/config --set-val CONFIG_TARGET_mediatek y
-    ./scripts/config --set-val CONFIG_TARGET_mediatek_filogic y
-    ./scripts/config --set-val CONFIG_TARGET_mediatek_filogic_DEVICE_edgepi_e87n y
+      - name: Prepare firmware artifacts path
+        id: organize
+        if: env.UPLOAD_FIRMWARE == 'true'
+        run: |
+          cd openwrt/bin/targets/*/*
+          rm -rf packages
+          echo "FIRMWARE=$PWD" >> "$GITHUB_ENV"
 
-    ./scripts/config --disable CONFIG_MTK_WIFI7_SUPPORT
-    ./scripts/config --disable CONFIG_PACKAGE_kmod-mt7992-firmware
-    ./scripts/config --disable CONFIG_PACKAGE_kmod-mt_wifi7
-    ./scripts/config --disable CONFIG_PACKAGE_kmod-mt_hwifi
-    ./scripts/config --disable CONFIG_PACKAGE_kmod-mt_wifi_osal
-    ./scripts/config --disable CONFIG_PACKAGE_kmod-warp
-    ./scripts/config --disable CONFIG_PACKAGE_kmod-wifi-profile
-    ./scripts/config --disable CONFIG_PACKAGE_iw
-    ./scripts/config --disable CONFIG_PACKAGE_iwinfo
-    ./scripts/config --disable CONFIG_PACKAGE_hostapd-common
-    ./scripts/config --disable CONFIG_PACKAGE_wpad-basic
+      - name: Upload firmware artifacts
+        uses: actions/upload-artifact@v6
+        if: env.UPLOAD_FIRMWARE == 'true'
+        with:
+          name: ImmortalWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+          path: ${{ env.FIRMWARE }}/*
 
-    ./scripts/config --enable CONFIG_PACKAGE_kmod-pwm
-    ./scripts/config --enable CONFIG_PACKAGE_kmod-thermal
-    ./scripts/config --enable CONFIG_PACKAGE_kmod-spi-mediatek
-else
-    echo "scripts/config 不可执行，使用 .config 片段追加"
-    cat >> .config <<'EOF'
-CONFIG_TARGET_mediatek=y
-CONFIG_TARGET_mediatek_filogic=y
-CONFIG_TARGET_mediatek_filogic_DEVICE_edgepi_e87n=y
+      - name: Generate release tag and notes
+        id: tag
+        if: env.UPLOAD_RELEASE == 'true'
+        run: |
+          echo "release_tag=immortalwrt-$(date +"%Y.%m.%d-%H%M%S")" >> "$GITHUB_OUTPUT"
+          cat <<EOF > release.txt
+          ImmortalWrt firmware for XG-040G-MD
+          ----------------------
+          设备型号: XG-040G-MD
+          构建目标: nokia_xg-040g-md
+          构建时间: $(date +"%Y-%m-%d %H:%M")
+          内核版本: 6.18.X
+          源码仓库: $REPO_URL
+          分支: $REPO_BRANCH
+          EOF
 
-CONFIG_MTK_WIFI7_SUPPORT=n
-CONFIG_PACKAGE_kmod-mt7992-firmware=n
-CONFIG_PACKAGE_kmod-mt_wifi7=n
-CONFIG_PACKAGE_kmod-mt_hwifi=n
-CONFIG_PACKAGE_kmod-mt_wifi_osal=n
-CONFIG_PACKAGE_kmod-warp=n
-CONFIG_PACKAGE_kmod-wifi-profile=n
-CONFIG_PACKAGE_iw=n
-CONFIG_PACKAGE_iwinfo=n
-CONFIG_PACKAGE_hostapd-common=n
-CONFIG_PACKAGE_wpad-basic=n
+      - name: Publish GitHub Release
+        uses: ncipollo/release-action@v1
+        if: env.UPLOAD_RELEASE == 'true'
+        with:
+          tag: ${{ steps.tag.outputs.release_tag }}
+          bodyFile: release.txt
+          artifacts: |
+            ${{ env.FIRMWARE }}/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-CONFIG_PACKAGE_kmod-pwm=y
-CONFIG_PACKAGE_kmod-thermal=y
-CONFIG_PACKAGE_kmod-spi-mediatek=y
-EOF
-fi
+      - name: Cleanup workflow runs
+        uses: Mattraks/delete-workflow-runs@v2
+        with:
+          retain_days: 7
+          keep_minimum_runs: 5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-make defconfig
-
-# --- 10. 复制 E87N DTS 文件 ---
-echo "### 10. 复制 E87N DTS 文件 ###"
-DTS_SRC="${GITHUB_WORKSPACE}/DTS"
-DTS_DST="${OPENWRT_DIR}/target/linux/mediatek/dts"
-
-if [ -d "$DTS_SRC" ]; then
-    mkdir -p "$DTS_DST"
-    cp -v "$DTS_SRC"/*.dts "$DTS_DST/" 2>/dev/null || true
-    cp -v "$DTS_SRC"/*.dtsi "$DTS_DST/" 2>/dev/null || true
-    echo "DTS文件复制完成"
-else
-    echo "警告: DTS目录不存在: $DTS_SRC"
-fi
-
-echo "### diy-part2.sh 执行完成 ###"
+      - name: Cleanup old GitHub Releases
+        if: env.UPLOAD_RELEASE == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          KEEP_RELEASES: ${{ env.KEEP_RELEASES }}
+          KEEP_RELEASE_MARKER: ${{ env.KEEP_RELEASE_MARKER }}
+        run: bash scripts/cleanup-old-releases.sh
