@@ -1,5 +1,5 @@
 #!/bin/bash
-# diy-part2.sh - E87N 专属定制 (最终版)
+# diy-part2.sh - E87N 专属定制 (语法修复版)
 
 OPENWRT_DIR="${GITHUB_WORKSPACE}/openwrt"
 if [ ! -d "$OPENWRT_DIR" ]; then
@@ -136,9 +136,9 @@ EOF
         cat "$HNAT_C" >> "${HNAT_C}.pre"
         mv "${HNAT_C}.pre" "$HNAT_C"
         
-        # 将函数定义从 void 改为 static void
-        sed -i 's/^void mtk_set_pse_drop(/static void mtk_set_pse_drop(/g' "$HNAT_C")
-        sed -i 's/^void hnat_cache_clr(/static void hnat_cache_clr(/g' "$HNAT_C")
+        # 修复语法错误：使用 | 作为 sed 分隔符，避免与括号冲突
+        sed -i 's|^void mtk_set_pse_drop(|static void mtk_set_pse_drop(|g' "$HNAT_C"
+        sed -i 's|^void hnat_cache_clr(|static void hnat_cache_clr(|g' "$HNAT_C"
         
         echo "hnat.c 已修复"
     else
