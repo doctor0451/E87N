@@ -1,5 +1,5 @@
 #!/bin/bash
-# diy-part2.sh - E87N 专属定制 (补丁方案)
+# diy-part2.sh - E87N 专属定制 (设备定义修复版)
 
 set -e
 
@@ -287,8 +287,60 @@ EOF
 
 echo "补丁文件已创建: $PATCH_DIR/900-fix-hnat-missing-declarations.patch"
 
-# --- 7. 设置目标配置 ---
-echo "### 7. 设置目标配置 ###"
+# --- 7. 确保 E87N 设备定义存在 ---
+echo "### 7. 确保 E87N 设备定义在 filogic.mk 中 ###"
+
+FILOGIC_MK="${OPENWRT_DIR}/target/linux/mediatek/image/filogic.mk"
+
+if [ -f "$FILOGIC_MK" ]; then
+    if ! grep -q "edgepi_e87n" "$FILOGIC_MK"; then
+        echo "添加 E87N 设备定义到 filogic.mk..."
+        cat >> "$FILOGIC_MK" << 'EOF'
+
+# EdgePI E87N
+define Device/edgepi_e87n
+  DEVICE_VENDOR := EdgePI
+  DEVICE_MODEL := E87N
+  DEVICE_DTS := mt7987a-edgepi-e87n
+  DEVICE_DTS_DIR := ../dts
+  DEVICE_PACKAGES := kmod-mt7987-eth kmod-mt7987-pinctrl
+  SUPPORTED_DEVICES := edgepi,e87n
+  IMAGE_SIZE := 8192k
+  IMAGES := sysupgrade.bin
+  IMAGE/sysupgrade.bin := append-kernel | append-rootfs | pad-rootfs | append-metadata
+endef
+TARGET_DEVICES += edgepi_e87n
+EOF
+        echo "E87N 设备定义已添加"
+    else
+        echo "E87N 设备定义已存在"
+    fi
+else
+    echo "警告: filogic.mk 不存在，尝试查找..."
+    FILOGIC_MK=$(find "${OPENWRT_DIR}/target/linux/mediatek" -name "filogic.mk" 2>/dev/null | head -1)
+    if [ -f "$FILOGIC_MK" ] && ! grep -q "edgepi_e87n" "$FILOGIC_MK"; then
+        cat >> "$FILOGIC_MK" << 'EOF'
+
+# EdgePI E87N
+define Device/edgepi_e87n
+  DEVICE_VENDOR := EdgePI
+  DEVICE_MODEL := E87N
+  DEVICE_DTS := mt7987a-edgepi-e87n
+  DEVICE_DTS_DIR := ../dts
+  DEVICE_PACKAGES := kmod-mt7987-eth kmod-mt7987-pinctrl
+  SUPPORTED_DEVICES := edgepi,e87n
+  IMAGE_SIZE := 8192k
+  IMAGES := sysupgrade.bin
+  IMAGE/sysupgrade.bin := append-kernel | append-rootfs | pad-rootfs | append-metadata
+endef
+TARGET_DEVICES += edgepi_e87n
+EOF
+        echo "E87N 设备定义已添加到 $FILOGIC_MK"
+    fi
+fi
+
+# --- 8. 设置目标配置 ---
+echo "### 8. 设置目标配置 ###"
 
 make defconfig
 
@@ -340,8 +392,8 @@ fi
 
 make defconfig
 
-# --- 8. 复制 E87N DTS 文件 ---
-echo "### 8. 复制 E87N DTS 文件 ###"
+# --- 9. 复制 E87N DTS 文件 ---
+echo "### 9. 复制 E87N DTS 文件 ###"
 DTS_SRC="${GITHUB_WORKSPACE}/DTS"
 DTS_DST="${OPENWRT_DIR}/target/linux/mediatek/dts"
 
@@ -353,5 +405,13 @@ if [ -d "$DTS_SRC" ]; then
 else
     echo "警告: DTS目录不存在: $DTS_SRC"
 fi
+
+# --- 10. 验证设备配置 ---
+echo "### 10. 验证设备配置 ###"
+echo "检查 filogic.mk 中的设备定义:"
+grep -E "edgepi_e87n|Device.*edgepi" "$FILOGIC_MK" 2>/dev/null || echo "未找到 edgepi 定义"
+
+echo "检查 .config 中的目标设备:"
+grep "CONFIG_TARGET.*edgepi" .config 2>/dev/null || echo "未找到 edgepi 配置"
 
 echo "### diy-part2.sh 执行完成 ###"
