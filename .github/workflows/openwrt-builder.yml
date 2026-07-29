@@ -70,29 +70,26 @@ jobs:
       run: |
         cd "$GITHUB_WORKSPACE/openwrt"
         
-        # 先执行 defconfig
+        # 显示当前 package/mtk/drivers/ 目录内容
+        echo "=== package/mtk/drivers/ 目录内容 ==="
+        ls -la package/mtk/drivers/ || echo "目录不存在"
+        
+        # 跳过 olddefconfig，直接使用 defconfig
+        echo "=== 使用 defconfig 生成配置 ==="
         make defconfig
         
-        # 显示关键目录
-        echo "=== target/linux/ 目录内容 ==="
-        ls -la target/linux/ || echo "target/linux/ 不存在"
+        # 显示关键配置
+        echo "=== 当前 .config 目标 ==="
+        grep "CONFIG_TARGET" .config | grep -v "^#" | head -10
         
-        echo "=== target/linux/mediatek/ 目录内容 ==="
-        ls -la target/linux/mediatek/ || echo "target/linux/mediatek/ 不存在"
-        
-        echo "=== feeds.conf.default 内容 ==="
-        cat feeds.conf.default || echo "feeds.conf.default 不存在"
-        
-        # 尝试 olddefconfig
-        if ! make olddefconfig -j1; then
-          echo "::error:: olddefconfig failed"
-          make olddefconfig V=s 2>&1 | tee ../olddefconfig.log
-          echo "=== olddefconfig 错误详情 ==="
-          tail -200 ../olddefconfig.log
+        # 检查配置是否生成成功
+        if [ ! -f ".config" ] || [ ! -s ".config" ]; then
+          echo "::error:: .config 文件不存在或为空"
           exit 1
         fi
         
-        # 下载源码包
+        # 直接下载源码包（跳过 olddefconfig）
+        echo "=== 开始下载源码包 ==="
         if ! make download -j8; then
           echo "::warning:: download with -j8 failed, retrying with -j1"
           make download -j1 2>&1 | tee ../make-download.log
@@ -102,6 +99,7 @@ jobs:
         # 清理不完整的下载文件
         find dl -size -1024c -exec ls -l {} \;
         find dl -size -1024c -exec rm -f {} \;
+
     - name: Compile firmware EdgePI E87N MT7987A
       id: compile
       run: |
