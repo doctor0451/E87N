@@ -1,5 +1,5 @@
 #!/bin/bash
-# diy-part2.sh - E87N 专属定制 (路径自动查找版)
+# diy-part2.sh - E87N 专属定制 (补丁方案)
 
 set -e
 
@@ -73,122 +73,222 @@ for pkg in "${PROBLEM_PACKAGES[@]}"; do
     fi
 done
 
-# --- 6. 查找并修改 mtk_hnat Makefile ---
-echo "### 6. 在 mtk_hnat Makefile 中禁用警告 ###"
+# --- 6. 创建 mtk_hnat 补丁文件 ---
+echo "### 6. 创建 mtk_hnat 补丁文件 ###"
 
-# 在整个 target/linux 目录下查找 mtk_hnat 的 Makefile
-HNAT_MAKEFILE=$(find target/linux -path "*/mtk_hnat/Makefile" 2>/dev/null | head -1)
+PATCH_DIR="${OPENWRT_DIR}/target/linux/mediatek/patches-6.12"
+mkdir -p "$PATCH_DIR"
 
-if [ -n "$HNAT_MAKEFILE" ] && [ -f "$HNAT_MAKEFILE" ]; then
-    if ! grep -q "Wno-missing-prototypes" "$HNAT_MAKEFILE"; then
-        echo "修改 Makefile: $HNAT_MAKEFILE"
-        echo -e "\n# 禁用驱动中的警告（这些警告被 -Werror 视为错误）" >> "$HNAT_MAKEFILE"
-        echo "ccflags-y += -Wno-missing-prototypes -Wno-unused-function" >> "$HNAT_MAKEFILE"
-        echo "Makefile 已修改"
-    else
-        echo "Makefile 已包含编译标志"
-    fi
-else
-    echo "警告: 找不到 mtk_hnat/Makefile，尝试在 build_dir 中查找..."
-    # 在 build_dir 中查找（内核源码已展开）
-    HNAT_MAKEFILE=$(find build_dir -path "*/mtk_hnat/Makefile" 2>/dev/null | head -1)
-    if [ -n "$HNAT_MAKEFILE" ] && [ -f "$HNAT_MAKEFILE" ]; then
-        echo "在 build_dir 中找到 Makefile: $HNAT_MAKEFILE"
-        if ! grep -q "Wno-missing-prototypes" "$HNAT_MAKEFILE"; then
-            echo -e "\n# 禁用驱动中的警告" >> "$HNAT_MAKEFILE"
-            echo "ccflags-y += -Wno-missing-prototypes -Wno-unused-function" >> "$HNAT_MAKEFILE"
-            echo "Makefile 已修改"
-        fi
-    else
-        echo "警告: 在所有位置都找不到 mtk_hnat/Makefile"
-    fi
-fi
+cat > "$PATCH_DIR/900-fix-hnat-missing-declarations.patch" << 'EOF'
+--- a/drivers/net/ethernet/mediatek/mtk_hnat/hnat.c
++++ b/drivers/net/ethernet/mediatek/mtk_hnat/hnat.c
+@@ -1,3 +1,9 @@
++/* FIXED_BY_PATCH: 确保 u32 已定义，并将函数标记为 static */
++#include <linux/types.h>
++
++static void mtk_set_pse_drop(u32 config);
++static void hnat_cache_clr(u32 ppe_id);
++
+ // SPDX-License-Identifier: GPL-2.0
+ /*
+  * Copyright (C) 2023 MediaTek Inc.
+@@ -32,7 +38,7 @@
+ 
+ static u32 hnat_ppe1_en = 0;
+ 
+-void mtk_set_pse_drop(u32 config) {
++static void mtk_set_pse_drop(u32 config) {
+ 	u32 reg = 0, val = 0;
+ 
+ 	if (config)
+@@ -138,7 +144,7 @@
+ 	return 0;
+ }
+ 
+-void hnat_cache_clr(u32 ppe_id)
++static void hnat_cache_clr(u32 ppe_id)
+ {
+ 	u32 addr;
+ 	u32 i, j;
+--- a/drivers/net/ethernet/mediatek/mtk_hnat/hnat_nf_hook.c
++++ b/drivers/net/ethernet/mediatek/mtk_hnat/hnat_nf_hook.c
+@@ -341,7 +341,7 @@
+ }
+ 
+ 
+-void ppd_dev_setting(void)
++static void ppd_dev_setting(void)
+ {
+ 	struct net_device *br_dev;
+ 	br_dev = __dev_get_by_name(&init_net, "br-lan");
+@@ -466,7 +466,7 @@
+ 	return NOTIFY_DONE;
+ }
+ 
+-void foe_clear_entry(struct neighbour *neigh)
++static void foe_clear_entry(struct neighbour *neigh)
+ {
+ 	u32 *daddr = (u32 *)neigh->primary_key;
+ 	unsigned char h_dest[ETH_ALEN];
+@@ -533,7 +533,7 @@
+ 	return NOTIFY_DONE;
+ }
+ 
+-unsigned int mape_add_ipv6_hdr(struct sk_buff *skb, struct ipv6hdr mape_ip6h)
++static unsigned int mape_add_ipv6_hdr(struct sk_buff *skb, struct ipv6hdr mape_ip6h)
+ {
+ 	struct ethhdr *eth = NULL;
+ 	struct ipv6hdr *ip6h = NULL;
+@@ -573,7 +573,7 @@
+ 	}
+ }
+ 
+-unsigned int do_hnat_ext_to_ge(struct sk_buff *skb, const struct net_device *in,
++static unsigned int do_hnat_ext_to_ge(struct sk_buff *skb, const struct net_device *in,
+ 			       const char *func)
+ {
+ 	if (hnat_priv->g_ppdev && hnat_priv->g_ppdev->flags & IFF_UP) {
+@@ -603,7 +603,7 @@
+ 	return -1;
+ }
+ 
+-unsigned int do_hnat_ext_to_ge2(struct sk_buff *skb, const char *func)
++static unsigned int do_hnat_ext_to_ge2(struct sk_buff *skb, const char *func)
+ {
+ 	struct ethhdr *eth = eth_hdr(skb);
+ 	struct net_device *dev;
+@@ -671,7 +671,7 @@
+ 	}
+ }
+ 
+-unsigned int do_hnat_ge_to_ext(struct sk_buff *skb, const char *func)
++static unsigned int do_hnat_ge_to_ext(struct sk_buff *skb, const char *func)
+ {
+ 	/*set where we to go*/
+ 	u8 index;
+@@ -833,7 +833,7 @@
+ 	entry.ipv4_dslite.flow_lbl[2] = ip6h->flow_lbl[0];
+ }
+ 
+-unsigned int do_hnat_mape_w2l_fast(struct sk_buff *skb, const struct net_device *in,
++static unsigned int do_hnat_mape_w2l_fast(struct sk_buff *skb, const struct net_device *in,
+ 				   const char *func)
+ {
+ 	struct ipv6hdr *ip6h = ipv6_hdr(skb);
+@@ -882,7 +882,7 @@
+ 	return -1;
+ }
+ 
+-void mtk_464xlat_pre_process(struct sk_buff *skb)
++static void mtk_464xlat_pre_process(struct sk_buff *skb)
+ {
+ 	struct foe_entry *foe;
+ 
+@@ -1429,7 +1429,7 @@
+ 	return chksum_base;
+ }
+ 
+-struct foe_entry ppe_fill_L2_info(struct ethhdr *eth, struct foe_entry entry,
++static struct foe_entry ppe_fill_L2_info(struct ethhdr *eth, struct foe_entry entry,
+ 				  struct flow_offload_hw_path *hw_path)
+ {
+ 	switch ((int)entry.bfib1.pkt_type) {
+@@ -1459,7 +1459,7 @@
+ 	return entry;
+ }
+ 
+-struct foe_entry ppe_fill_info_blk(struct ethhdr *eth, struct foe_entry entry,
++static struct foe_entry ppe_fill_info_blk(struct ethhdr *eth, struct foe_entry entry,
+ 				   struct flow_offload_hw_path *hw_path)
+ {
+ 	entry.bfib1.cah = 1;
+@@ -2709,7 +2709,7 @@
+ }
+ 
+ 
+-int mtk_464xlat_fill_mac(struct foe_entry *entry, struct sk_buff *skb,
++static int mtk_464xlat_fill_mac(struct foe_entry *entry, struct sk_buff *skb,
+ 			 const struct net_device *out, bool l2w)
+ {
+ 	const struct in6_addr *ipv6_nexthop;
+@@ -2749,7 +2749,7 @@
+ 	return 0;
+ }
+ 
+-int mtk_464xlat_get_hash(struct sk_buff *skb, u32 *hash, bool l2w)
++static int mtk_464xlat_get_hash(struct sk_buff *skb, u32 *hash, bool l2w)
+ {
+ 	struct in6_addr addr_v6, prefix;
+ 	struct ipv6hdr *ip6h;
+@@ -2803,7 +2803,7 @@
+ 	return 0;
+ }
+ 
+-void mtk_464xlat_fill_info1(struct foe_entry *entry,
++static void mtk_464xlat_fill_info1(struct foe_entry *entry,
+ 			    struct sk_buff *skb, bool l2w)
+ {
+ 	entry.bfib1.cah = 1;
+@@ -2821,7 +2821,7 @@
+ 	}
+ }
+ 
+-void mtk_464xlat_fill_info2(struct foe_entry *entry, bool l2w)
++static void mtk_464xlat_fill_info2(struct foe_entry *entry, bool l2w)
+ {
+ 	entry.ipv4_dslite.iblk2.mibf = 1;
+ 	entry.ipv4_dslite.iblk2.port_ag = 0xF;
+@@ -2832,7 +2832,7 @@
+ 		entry.ipv6_6rd.iblk2.dp = NR_GMAC1_PORT;
+ }
+ 
+-void mtk_464xlat_fill_ipv4(struct foe_entry *entry, struct sk_buff *skb,
++static void mtk_464xlat_fill_ipv4(struct foe_entry *entry, struct sk_buff *skb,
+ 			   struct foe_entry *foe, bool l2w)
+ {
+ 	struct iphdr *iph;
+@@ -2855,7 +2855,7 @@
+ 	}
+ }
+ 
+-int mtk_464xlat_fill_ipv6(struct foe_entry *entry, struct sk_buff *skb,
++static int mtk_464xlat_fill_ipv6(struct foe_entry *entry, struct sk_buff *skb,
+ 			  struct foe_entry *foe, bool l2w)
+ {
+ 	struct ipv6hdr *ip6h;
+@@ -2906,7 +2906,7 @@
+ 	return 0;
+ }
+ 
+-int mtk_464xlat_fill_l2(struct foe_entry *entry, struct sk_buff *skb,
++static int mtk_464xlat_fill_l2(struct foe_entry *entry, struct sk_buff *skb,
+ 			const struct net_device *dev, bool l2w)
+ {
+ 	const unsigned int *port_reg;
+@@ -2939,7 +2939,7 @@
+ }
+ 
+ 
+-int mtk_464xlat_fill_l3(struct foe_entry *entry, struct sk_buff *skb,
++static int mtk_464xlat_fill_l3(struct foe_entry *entry, struct sk_buff *skb,
+ 			struct foe_entry *foe, bool l2w)
+ {
+ 	mtk_464xlat_fill_ipv4(entry, skb, foe, l2w);
+@@ -2950,7 +2950,7 @@
+ 	return 0;
+ }
+ 
+-int mtk_464xlat_post_process(struct sk_buff *skb, const struct net_device *out)
++static int mtk_464xlat_post_process(struct sk_buff *skb, const struct net_device *out)
+ {
+ 	struct foe_entry *foe, entry = {};
+ 	u32 hash;
+EOF
 
-# --- 7. 查找并修复 hnat.c ---
-echo "### 7. 修复 hnat.c 的 static 问题 ###"
+echo "补丁文件已创建: $PATCH_DIR/900-fix-hnat-missing-declarations.patch"
 
-HNAT_C=$(find target/linux -name "hnat.c" -path "*/mtk_hnat/*" 2>/dev/null | head -1)
-
-if [ -z "$HNAT_C" ]; then
-    # 在 build_dir 中查找
-    HNAT_C=$(find build_dir -name "hnat.c" -path "*/mtk_hnat/*" 2>/dev/null | head -1)
-fi
-
-if [ -n "$HNAT_C" ] && [ -f "$HNAT_C" ]; then
-    if ! grep -q "FIXED_BY_SCRIPT" "$HNAT_C"; then
-        echo "修复 hnat.c: $HNAT_C"
-        
-        # 使用临时文件添加头文件和声明
-        {
-            echo "/* FIXED_BY_SCRIPT: 确保 u32 已定义，并将函数标记为 static */"
-            echo "#include <linux/types.h>"
-            echo ""
-            echo "static void mtk_set_pse_drop(u32 config);"
-            echo "static void hnat_cache_clr(u32 ppe_id);"
-            echo ""
-            cat "$HNAT_C"
-        } > "${HNAT_C}.new"
-        mv "${HNAT_C}.new" "$HNAT_C"
-        
-        # 使用 perl 替代 sed，更可靠地处理括号
-        perl -pi -e 's/^void mtk_set_pse_drop\(/static void mtk_set_pse_drop(/g' "$HNAT_C"
-        perl -pi -e 's/^void hnat_cache_clr\(/static void hnat_cache_clr(/g' "$HNAT_C")
-        
-        echo "hnat.c 已修复"
-    else
-        echo "hnat.c 已包含修复"
-    fi
-else
-    echo "警告: 找不到 hnat.c"
-fi
-
-# --- 8. 查找并修复 hnat_nf_hook.c ---
-echo "### 8. 修复 hnat_nf_hook.c 的 static 问题 ###"
-
-HNAT_NF_HOOK_C=$(find target/linux -name "hnat_nf_hook.c" -path "*/mtk_hnat/*" 2>/dev/null | head -1)
-
-if [ -z "$HNAT_NF_HOOK_C" ]; then
-    HNAT_NF_HOOK_C=$(find build_dir -name "hnat_nf_hook.c" -path "*/mtk_hnat/*" 2>/dev/null | head -1)
-fi
-
-if [ -n "$HNAT_NF_HOOK_C" ] && [ -f "$HNAT_NF_HOOK_C" ]; then
-    if ! grep -q "FIXED_BY_SCRIPT" "$HNAT_NF_HOOK_C"; then
-        echo "修复 hnat_nf_hook.c: $HNAT_NF_HOOK_C"
-        
-        # 在文件开头添加标记
-        sed -i '1i/* FIXED_BY_SCRIPT: 将内部函数标记为 static */' "$HNAT_NF_HOOK_C"
-        
-        # 使用 perl 替代 sed，更可靠
-        perl -pi -e 's/^void ppd_dev_setting\(/static void ppd_dev_setting(/g' "$HNAT_NF_HOOK_C"
-        perl -pi -e 's/^void foe_clear_entry\(/static void foe_clear_entry(/g' "$HNAT_NF_HOOK_C"
-        perl -pi -e 's/^unsigned int mape_add_ipv6_hdr\(/static unsigned int mape_add_ipv6_hdr(/g' "$HNAT_NF_HOOK_C"
-        perl -pi -e 's/^unsigned int do_hnat_ext_to_ge\(/static unsigned int do_hnat_ext_to_ge(/g' "$HNAT_NF_HOOK_C"
-        perl -pi -e 's/^unsigned int do_hnat_ext_to_ge2\(/static unsigned int do_hnat_ext_to_ge2(/g' "$HNAT_NF_HOOK_C"
-        perl -pi -e 's/^unsigned int do_hnat_ge_to_ext\(/static unsigned int do_hnat_ge_to_ext(/g' "$HNAT_NF_HOOK_C"
-        perl -pi -e 's/^unsigned int do_hnat_mape_w2l_fast\(/static unsigned int do_hnat_mape_w2l_fast(/g' "$HNAT_NF_HOOK_C"
-        perl -pi -e 's/^void mtk_464xlat_pre_process\(/static void mtk_464xlat_pre_process(/g' "$HNAT_NF_HOOK_C"
-        perl -pi -e 's/^struct foe_entry ppe_fill_L2_info\(/static struct foe_entry ppe_fill_L2_info(/g' "$HNAT_NF_HOOK_C"
-        perl -pi -e 's/^struct foe_entry ppe_fill_info_blk\(/static struct foe_entry ppe_fill_info_blk(/g' "$HNAT_NF_HOOK_C"
-        perl -pi -e 's/^int mtk_464xlat_fill_mac\(/static int mtk_464xlat_fill_mac(/g' "$HNAT_NF_HOOK_C"
-        perl -pi -e 's/^int mtk_464xlat_get_hash\(/static int mtk_464xlat_get_hash(/g' "$HNAT_NF_HOOK_C"
-        perl -pi -e 's/^void mtk_464xlat_fill_info1\(/static void mtk_464xlat_fill_info1(/g' "$HNAT_NF_HOOK_C"
-        perl -pi -e 's/^void mtk_464xlat_fill_info2\(/static void mtk_464xlat_fill_info2(/g' "$HNAT_NF_HOOK_C"
-        perl -pi -e 's/^void mtk_464xlat_fill_ipv4\(/static void mtk_464xlat_fill_ipv4(/g' "$HNAT_NF_HOOK_C"
-        perl -pi -e 's/^int mtk_464xlat_fill_ipv6\(/static int mtk_464xlat_fill_ipv6(/g' "$HNAT_NF_HOOK_C"
-        perl -pi -e 's/^int mtk_464xlat_fill_l2\(/static int mtk_464xlat_fill_l2(/g' "$HNAT_NF_HOOK_C"
-        perl -pi -e 's/^int mtk_464xlat_fill_l3\(/static int mtk_464xlat_fill_l3(/g' "$HNAT_NF_HOOK_C"
-        perl -pi -e 's/^int mtk_464xlat_post_process\(/static int mtk_464xlat_post_process(/g' "$HNAT_NF_HOOK_C"
-        
-        echo "hnat_nf_hook.c 已修复"
-    else
-        echo "hnat_nf_hook.c 已包含修复"
-    fi
-else
-    echo "警告: 找不到 hnat_nf_hook.c"
-fi
-
-# --- 9. 设置目标配置 ---
-echo "### 9. 设置目标配置 ###"
+# --- 7. 设置目标配置 ---
+echo "### 7. 设置目标配置 ###"
 
 make defconfig
 
@@ -240,8 +340,8 @@ fi
 
 make defconfig
 
-# --- 10. 复制 E87N DTS 文件 ---
-echo "### 10. 复制 E87N DTS 文件 ###"
+# --- 8. 复制 E87N DTS 文件 ---
+echo "### 8. 复制 E87N DTS 文件 ###"
 DTS_SRC="${GITHUB_WORKSPACE}/DTS"
 DTS_DST="${OPENWRT_DIR}/target/linux/mediatek/dts"
 
