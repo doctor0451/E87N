@@ -6,9 +6,9 @@ on:
   repository_dispatch:
   workflow_dispatch:
 env:
-  # 改用官方 OpenWrt 源码
-  REPO_URL: https://git.openwrt.org/openwrt/openwrt.git
-  REPO_BRANCH: main  # 或者 openwrt-25.12 等稳定分支
+  # 目标源码仓库：Hiveton higowrt（包含 E87N DTS 和驱动）
+  REPO_URL: https://github.com/Hiveton/higowrt
+  REPO_BRANCH: main
   FEEDS_CONF: feeds.conf.default
   CONFIG_FILE: .config
   DIY_P1_SH: diy-part1.sh
@@ -37,10 +37,10 @@ jobs:
         sudo -E apt-get -qq install ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential bzip2 ccache cmake cpio curl device-tree-compiler fastjar flex gawk gettext gcc-multilib g++-multilib git gperf haveged help2man intltool libc6-dev-i386 libelf-dev libfuse-dev libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev libncurses5-dev libncursesw5-dev libpython3-dev libreadline-dev libssl-dev libtool lrzsz mkisofs msmtp ninja-build p7zip p7zip-full patch pkgconf python2.7 python3 python3-pyelftools python3-setuptools qemu-utils rsync scons squashfs-tools subversion swig texinfo uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev
         sudo -E apt-get -qq autoremove --purge
         sudo -E apt-get -qq clean
-        sudo timedatectl set-timezone "$TZ"
+        sudo timedatectl set-timezone "$TZ" || true
         sudo mkdir -p /workdir
         sudo chown $USER:$GROUPS /workdir
-    - name: Clone OpenWrt 官方源码
+    - name: Clone MT798x 源码
       working-directory: /workdir
       run: |
         df -hT $PWD
@@ -69,37 +69,21 @@ jobs:
       id: package
       run: |
         cd "$GITHUB_WORKSPACE/openwrt"
-        
-        # 显示当前 package/mtk/drivers/ 目录内容
-        echo "=== package/mtk/drivers/ 目录内容 ==="
-        ls -la package/mtk/drivers/ || echo "目录不存在"
-        
-        # 跳过 olddefconfig，直接使用 defconfig
-        echo "=== 使用 defconfig 生成配置 ==="
         make defconfig
-        
-        # 显示关键配置
-        echo "=== 当前 .config 目标 ==="
-        grep "CONFIG_TARGET" .config | grep -v "^#" | head -10
-        
-        # 检查配置是否生成成功
-        if [ ! -f ".config" ] || [ ! -s ".config" ]; then
-          echo "::error:: .config 文件不存在或为空"
+        if ! make olddefconfig -j1; then
+          echo "::error:: olddefconfig failed"
+          make olddefconfig V=s 2>&1 | tee ../olddefconfig.log
+          echo "=== olddefconfig 错误详情 ==="
+          tail -200 ../olddefconfig.log
           exit 1
         fi
-        
-        # 直接下载源码包（跳过 olddefconfig）
-        echo "=== 开始下载源码包 ==="
         if ! make download -j8; then
           echo "::warning:: download with -j8 failed, retrying with -j1"
           make download -j1 2>&1 | tee ../make-download.log
           exit 1
         fi
-        
-        # 清理不完整的下载文件
         find dl -size -1024c -exec ls -l {} \;
         find dl -size -1024c -exec rm -f {} \;
-
     - name: Compile firmware EdgePI E87N MT7987A
       id: compile
       run: |
@@ -148,7 +132,7 @@ jobs:
       run: |
         echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
         echo "### EdgePI E87N MT7987A 无WiFi固件" > release.txt
-        echo "- 源码：OpenWrt 官方主线 (mediatek/filogic)" >> release.txt
+        echo "- 源码：Hiveton/higowrt (OpenWrt 25.12.4)" >> release.txt
         echo "- CPU: MT7987A 8G eMMC 双NVME插槽 无内置WiFi" >> release.txt
         echo "- 编译时间: $(date +"%Y-%m-%d %H:%M:%S")" >> release.txt
         echo "status=success" >> $GITHUB_OUTPUT
