@@ -1,5 +1,5 @@
 #!/bin/bash
-# diy-part2.sh - E87N 专属定制 (修复 Kconfig 递归依赖)
+# diy-part2.sh - E87N 专属定制 (修复 nftables-nojson 递归依赖)
 
 set -e
 
@@ -66,7 +66,7 @@ echo "### 4. 更新并安装 feeds ###"
 ./scripts/feeds update -a
 ./scripts/feeds install -a
 
-# --- 5. 二次清理问题包（含 Kconfig 递归依赖） ---
+# --- 5. 二次清理问题包 ---
 echo "### 5. 二次清理问题包 ###"
 for pkg in "${PROBLEM_PACKAGES[@]}"; do
     if [ -d "$pkg" ]; then
@@ -75,8 +75,37 @@ for pkg in "${PROBLEM_PACKAGES[@]}"; do
     fi
 done
 
-# --- 6. 创建 mtk_hnat 补丁文件 ---
-echo "### 6. 创建 mtk_hnat 补丁文件 ###"
+# --- 6. 禁用 nftables-nojson 递归依赖（关键修复） ---
+echo "### 6. 禁用 nftables-nojson 递归依赖 ###"
+
+# 方法1：使用 scripts/config（如果可用）
+if [ -x "./scripts/config" ] && [ ! -d "./scripts/config" ]; then
+    echo "使用 scripts/config 禁用 PACKAGE_nftables-nojson"
+    ./scripts/config --disable PACKAGE_nftables-nojson || true
+else
+    echo "scripts/config 不可用，直接修改 .config"
+    # 从 .config 中删除相关行
+    sed -i '/nftables-nojson/d' .config 2>/dev/null || true
+    # 确保被禁用
+    if ! grep -q '^# CONFIG_PACKAGE_nftables-nojson is not set' .config; then
+        echo '# CONFIG_PACKAGE_nftables-nojson is not set' >> .config
+    fi
+fi
+
+# 额外：在 tmp/.config-package.in 中查找并注释掉递归依赖
+# 这是一个更彻底的修复
+if [ -f "tmp/.config-package.in" ]; then
+    echo "检查 tmp/.config-package.in 中的 nftables-nojson..."
+    if grep -q "PACKAGE_nftables-nojson" tmp/.config-package.in; then
+        # 备份并注释掉相关行
+        cp tmp/.config-package.in tmp/.config-package.in.bak
+        sed -i '/PACKAGE_nftables-nojson/d' tmp/.config-package.in
+        echo "已从 tmp/.config-package.in 中删除 nftables-nojson 相关行"
+    fi
+fi
+
+# --- 7. 创建 mtk_hnat 补丁文件 ---
+echo "### 7. 创建 mtk_hnat 补丁文件 ###"
 
 PATCH_DIR="${OPENWRT_DIR}/target/linux/mediatek/patches-6.12"
 mkdir -p "$PATCH_DIR"
@@ -289,8 +318,8 @@ EOF
 
 echo "补丁文件已创建: $PATCH_DIR/900-fix-hnat-missing-declarations.patch"
 
-# --- 7. 确保 E87N 设备定义存在 ---
-echo "### 7. 确保 E87N 设备定义在 filogic.mk 中 ###"
+# --- 8. 确保 E87N 设备定义存在 ---
+echo "### 8. 确保 E87N 设备定义在 filogic.mk 中 ###"
 
 FILOGIC_MK="${OPENWRT_DIR}/target/linux/mediatek/image/filogic.mk"
 
@@ -341,8 +370,8 @@ EOF
     fi
 fi
 
-# --- 8. 设置目标配置 ---
-echo "### 8. 设置目标配置 ###"
+# --- 9. 设置目标配置 ---
+echo "### 9. 设置目标配置 ###"
 
 make defconfig
 
@@ -394,8 +423,8 @@ fi
 
 make defconfig
 
-# --- 9. 复制 E87N DTS 文件 ---
-echo "### 9. 复制 E87N DTS 文件 ###"
+# --- 10. 复制 E87N DTS 文件 ---
+echo "### 10. 复制 E87N DTS 文件 ###"
 DTS_SRC="${GITHUB_WORKSPACE}/DTS"
 DTS_DST="${OPENWRT_DIR}/target/linux/mediatek/dts"
 
@@ -408,12 +437,15 @@ else
     echo "警告: DTS目录不存在: $DTS_SRC"
 fi
 
-# --- 10. 验证设备配置 ---
-echo "### 10. 验证设备配置 ###"
+# --- 11. 验证设备配置 ---
+echo "### 11. 验证设备配置 ###"
 echo "检查 filogic.mk 中的设备定义:"
 grep -E "edgepi_e87n|Device.*edgepi" "$FILOGIC_MK" 2>/dev/null || echo "未找到 edgepi 定义"
 
 echo "检查 .config 中的目标设备:"
 grep "CONFIG_TARGET.*edgepi" .config 2>/dev/null || echo "未找到 edgepi 配置"
+
+echo "检查 nftables-nojson 状态:"
+grep "nftables-nojson" .config 2>/dev/null || echo "nftables-nojson 未配置（正确）"
 
 echo "### diy-part2.sh 执行完成 ###"
