@@ -1,5 +1,5 @@
 #!/bin/bash
-# diy-part2.sh - E87N 专属定制 (设备定义修复版)
+# diy-part2.sh - E87N 专属定制 (修复 Kconfig 递归依赖)
 
 set -e
 
@@ -32,7 +32,7 @@ for pkg in "${WIFI_PACKAGES[@]}"; do
     fi
 done
 
-# --- 2. 删除有问题的 feeds 包 ---
+# --- 2. 删除有问题的 feeds 包（含 Kconfig 递归依赖） ---
 echo "### 2. 删除有问题的 feeds 包 ###"
 PROBLEM_PACKAGES=(
     "package/feeds/helloworld/luci-app-ssr-plus"
@@ -41,6 +41,8 @@ PROBLEM_PACKAGES=(
     "package/feeds/luci/luci-app-mjpg-streamer"
     "package/feeds/packages/net/freeradius3"
     "package/feeds/packages/net/nftables"
+    "package/feeds/packages/lang/lua-eco"
+    "package/feeds/packages/net/nftables-nojson"
 )
 
 for pkg in "${PROBLEM_PACKAGES[@]}"; do
@@ -64,7 +66,7 @@ echo "### 4. 更新并安装 feeds ###"
 ./scripts/feeds update -a
 ./scripts/feeds install -a
 
-# --- 5. 二次清理问题包 ---
+# --- 5. 二次清理问题包（含 Kconfig 递归依赖） ---
 echo "### 5. 二次清理问题包 ###"
 for pkg in "${PROBLEM_PACKAGES[@]}"; do
     if [ -d "$pkg" ]; then
